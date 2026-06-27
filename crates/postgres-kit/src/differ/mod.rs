@@ -4,8 +4,9 @@
 //! Authoring flow: write [`crate::spec::PgTableSpec`]s, [`lower`] them to a
 //! [`SchemaSnapshot`], and [`diff`] the previous snapshot against the new one.
 //!
-//! [`diff`] is a stub for now (returns no statements); the differ agent fills it
-//! in against the corpus harness in `tests/`.
+//! For a from-scratch `CREATE` migration (incl. non-`public` schemas, with
+//! optional raw-SQL injections), [`assemble_create_migration`] is the one-call
+//! path; [`diff_with_raw_sql`] is the lower-level seam.
 
 pub mod diff;
 pub mod ir;
