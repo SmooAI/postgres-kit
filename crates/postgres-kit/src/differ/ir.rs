@@ -171,7 +171,8 @@ impl SnapTable {
         format!("{}.{}", self.schema, self.name)
     }
 
-    pub fn col(mut self, column: SnapColumn) -> Self {
+    pub fn col(mut self, mut column: SnapColumn) -> Self {
+        column.position = self.columns.len() as u32;
         self.columns.insert(column.name.clone(), column);
         self
     }
@@ -258,6 +259,12 @@ pub struct SnapColumnUnique {
 }
 
 /// A normalized column. `ty` is the rendered Postgres type string.
+///
+/// `position` records declaration order within the owning table so `CREATE TABLE`
+/// renders columns in author order (the `columns` map itself is a `BTreeMap`, which
+/// would otherwise iterate name-sorted). It is assigned by [`SnapTable::col`] and is
+/// *not* part of a column's logical identity — the differ compares columns by their
+/// fields, ignoring `position`, so reordering alone never emits DDL.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapColumn {
     pub name: String,
@@ -269,6 +276,8 @@ pub struct SnapColumn {
     pub generated: Option<String>,
     pub identity: Option<SnapIdentity>,
     pub unique: Option<SnapColumnUnique>,
+    /// Declaration order within the owning table (assigned by [`SnapTable::col`]).
+    pub position: u32,
 }
 
 impl SnapColumn {
@@ -282,6 +291,7 @@ impl SnapColumn {
             generated: None,
             identity: None,
             unique: None,
+            position: 0,
         }
     }
 

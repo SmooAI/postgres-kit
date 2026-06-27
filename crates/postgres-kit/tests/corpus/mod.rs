@@ -36,23 +36,30 @@ pub struct DiffCase {
     pub status: Status,
 }
 
-// ---- category registry (differ/integrator agent expands this) ----
-// pub mod tables;
-// pub mod columns;
-// pub mod enums;
-// pub mod constraints;
-// pub mod indexes;
-// pub mod policies;
-// pub mod views;
-// pub mod sequences;
-// pub mod roles;
+// ---- category registry ----
+pub mod checks;
+pub mod columns;
+pub mod enums;
+pub mod generated;
+pub mod identity;
+pub mod policy;
+pub mod roles;
+pub mod sequences;
+pub mod tables;
+pub mod views;
 
-/// Collect every registered case. Empty until categories are registered above.
+/// Collect every registered case.
 pub fn all_cases() -> Vec<DiffCase> {
-    #[allow(unused_mut)]
     let mut out: Vec<DiffCase> = Vec::new();
-    // out.extend(tables::cases());
-    // out.extend(columns::cases());
-    // ...
+    out.extend(tables::cases());
+    out.extend(columns::cases());
+    out.extend(checks::cases());
+    out.extend(enums::cases());
+    out.extend(generated::cases());
+    out.extend(identity::cases());
+    out.extend(policy::cases());
+    out.extend(roles::cases());
+    out.extend(sequences::cases());
+    out.extend(views::cases());
     out
 }

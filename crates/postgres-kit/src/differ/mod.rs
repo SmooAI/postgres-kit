@@ -7,6 +7,7 @@
 //! [`diff`] is a stub for now (returns no statements); the differ agent fills it
 //! in against the corpus harness in `tests/`.
 
+pub mod diff;
 pub mod ir;
 pub mod lower;
 pub mod renames;
@@ -18,16 +19,13 @@ pub use ir::{
     SnapPolicy, SnapRole, SnapSequence, SnapTable, SnapUnique, SnapView,
 };
 pub use lower::{lower, lower_table, lower_tables};
-pub use renames::{ColumnRename, EnumRename, PolicyRename, RenameHints, TableRename};
+pub use renames::{ColumnRename, EnumRename, PolicyRename, RenameHints, RoleRename, TableRename};
 pub use statement::DdlStatement;
 
 /// Diff `from` into `to`, returning the ordered DDL statements that perform the
-/// migration. `hints` resolves ambiguous drop+add pairs into renames.
-///
-/// STUB: returns an empty plan. The differ agent implements the real logic.
+/// migration. `hints` resolves ambiguous drop+add pairs into renames/moves.
 pub fn diff(from: &SchemaSnapshot, to: &SchemaSnapshot, hints: &RenameHints) -> Vec<DdlStatement> {
-    let _ = (from, to, hints);
-    Vec::new()
+    diff::diff(from, to, hints)
 }
 
 #[cfg(test)]

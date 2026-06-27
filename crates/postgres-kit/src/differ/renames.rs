@@ -8,16 +8,30 @@
 //! policy:public.users.old->public.users.new   # policy rename (table-scoped)
 //! ```
 //!
-//! Table/column hints carry no prefix and are disambiguated by dotted arity
-//! (2 = table, 3 = column). Enum/policy hints carry an `enum:` / `policy:` tag.
+//! Untagged hints are disambiguated by dotted arity: 1 = role (cluster-global
+//! bare name), 2 = table/relation, 3 = column. Enum/policy hints carry an
+//! `enum:` / `policy:` tag. Untagged arity-2 hints double as the *move/rename*
+//! signal for any schema-scoped relation (table, enum, sequence, view) — the two
+//! sides may differ in schema, so they cover both `RENAME TO` and `SET SCHEMA`.
 //! Parse with [`RenameHints::parse`].
 
 use crate::safety::SchemaError;
 
-/// A table rename within a schema.
+/// A relation rename and/or schema move. The two sides may differ in both schema
+/// and name; the differ matches a hint against an object's `from` qualified name
+/// and resolves whichever of `SET SCHEMA` / `RENAME TO` is implied. Used for
+/// tables, enums, sequences and views (the untagged arity-2 hint form).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableRename {
-    pub schema: String,
+    pub from_schema: String,
+    pub from: String,
+    pub to_schema: String,
+    pub to: String,
+}
+
+/// A role rename (roles are cluster-global bare names — untagged arity-1 hints).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoleRename {
     pub from: String,
     pub to: String,
 }
@@ -55,6 +69,7 @@ pub struct RenameHints {
     pub columns: Vec<ColumnRename>,
     pub enums: Vec<EnumRename>,
     pub policies: Vec<PolicyRename>,
+    pub roles: Vec<RoleRename>,
 }
 
 impl RenameHints {
@@ -67,11 +82,16 @@ impl RenameHints {
         Ok(hints)
     }
 
-    /// Look up a table rename by its source `(schema, from)`.
+    /// Look up a relation rename/move by its source `(schema, from)`.
     pub fn find_table_rename(&self, schema: &str, from: &str) -> Option<&TableRename> {
         self.tables
             .iter()
-            .find(|r| r.schema == schema && r.from == from)
+            .find(|r| r.from_schema == schema && r.from == from)
+    }
+
+    /// Look up a role rename by its source name.
+    pub fn find_role_rename(&self, from: &str) -> Option<&RoleRename> {
+        self.roles.iter().find(|r| r.from == from)
     }
 
     /// Look up a column rename by its source `(schema, table, from)`.
@@ -145,11 +165,12 @@ fn parse_one(item: &str, hints: &mut RenameHints) -> Result<(), SchemaError> {
 
     let resolved = match kind {
         Kind::Untagged => match from_parts.len() {
+            1 => Kind::Role,
             2 => Kind::Table,
             3 => Kind::Column,
             _ => {
                 return Err(invalid(
-                    "untagged hint must be schema.table or schema.table.column",
+                    "untagged hint must be role, schema.table, or schema.table.column",
                 ))
             }
         },
@@ -161,13 +182,21 @@ fn parse_one(item: &str, hints: &mut RenameHints) -> Result<(), SchemaError> {
             if from_parts.len() != 2 {
                 return Err(invalid("table rename must be schema.table->schema.table"));
             }
-            if from_parts[0] != to_parts[0] {
-                return Err(invalid("table rename cannot change schema"));
-            }
+            // The two sides may differ in schema (a SET SCHEMA move) and/or name.
             hints.tables.push(TableRename {
-                schema: from_parts[0].to_string(),
+                from_schema: from_parts[0].to_string(),
                 from: from_parts[1].to_string(),
+                to_schema: to_parts[0].to_string(),
                 to: to_parts[1].to_string(),
+            });
+        }
+        Kind::Role => {
+            if from_parts.len() != 1 {
+                return Err(invalid("role rename must be name->name"));
+            }
+            hints.roles.push(RoleRename {
+                from: from_parts[0].to_string(),
+                to: to_parts[0].to_string(),
             });
         }
         Kind::Column => {
@@ -228,6 +257,7 @@ enum Kind {
     Column,
     Enum,
     Policy,
+    Role,
 }
 
 #[cfg(test)]
@@ -244,8 +274,9 @@ mod tests {
         assert_eq!(
             h.tables,
             vec![TableRename {
-                schema: "public".into(),
+                from_schema: "public".into(),
                 from: "users".into(),
+                to_schema: "public".into(),
                 to: "members".into(),
             }]
         );
@@ -298,11 +329,27 @@ mod tests {
     }
 
     #[test]
-    fn rejects_schema_change() {
-        assert!(matches!(
-            RenameHints::parse(&["public.users->other.users"]),
-            Err(SchemaError::InvalidRenameHint { .. })
-        ));
+    fn accepts_cross_schema_move() {
+        // An untagged arity-2 hint may change schema — it is the move/rename
+        // signal for relations (tables, enums, sequences, views).
+        let h = RenameHints::parse(&["folder1.enum->folder2.enum"]).unwrap();
+        assert_eq!(h.tables[0].from_schema, "folder1");
+        assert_eq!(h.tables[0].to_schema, "folder2");
+        assert_eq!(h.tables[0].from, "enum");
+        assert_eq!(h.tables[0].to, "enum");
+    }
+
+    #[test]
+    fn parses_role_rename() {
+        let h = RenameHints::parse(&["manager->admin"]).unwrap();
+        assert_eq!(
+            h.roles,
+            vec![RoleRename {
+                from: "manager".into(),
+                to: "admin".into(),
+            }]
+        );
+        assert!(h.find_role_rename("manager").is_some());
     }
 
     #[test]

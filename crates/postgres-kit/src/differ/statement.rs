@@ -1,13 +1,22 @@
 //! The lean [`DdlStatement`] IR — one variant per SQL change the differ emits,
 //! each rendering to a single SQL string via [`DdlStatement::to_sql`].
 //!
-//! These are *not* drizzle's squashed encodings; they are keyed to the SQL we
-//! actually run. The rendering here is a best-effort baseline the differ agent
-//! refines against the corpus.
+//! Rendering matches drizzle-kit's `sqlStatements` output token-for-token (the
+//! differ conformance corpus compares against it under whitespace-normalized
+//! equality). Notable drizzle conventions reproduced here:
+//!
+//! - **`public` schema is implicit for relations** (tables, indexes, policies):
+//!   `CREATE TABLE "users"`, not `"public"."users"`. Types, views, sequences and
+//!   foreign-key *targets* are always schema-qualified.
+//! - Constraint column lists are comma-joined with **no spaces** and no space
+//!   before the paren (`PRIMARY KEY("a","b")`); `FOREIGN KEY (...)` /
+//!   `CHECK (...)` keep their space.
+//! - `DROP TABLE`/`DROP POLICY` carry `CASCADE`; FKs always render
+//!   `ON DELETE ... ON UPDATE ...` (defaulting to `no action`).
 
 use crate::differ::ir::{
     SnapColumn, SnapCompositePk, SnapEnum, SnapForeignKey, SnapIdentity, SnapIndex, SnapPolicy,
-    SnapSequence, SnapTable, SnapUnique, SnapView,
+    SnapRole, SnapSequence, SnapTable, SnapUnique, SnapView,
 };
 use crate::safety::quote_identifier;
 use crate::spec::IdentityKind;
@@ -21,17 +30,47 @@ fn qualify(name: &str) -> String {
         .join(".")
 }
 
-/// Join and quote a list of bare column names.
-fn quote_cols(cols: &[String]) -> String {
+/// Qualify a relation (table/index/policy target) the way drizzle does: the
+/// `public` schema is left implicit, every other schema is rendered.
+fn qualify_table(schema: &str, name: &str) -> String {
+    if schema == "public" {
+        quote_identifier(name)
+    } else {
+        format!("{}.{}", quote_identifier(schema), quote_identifier(name))
+    }
+}
+
+/// Join and quote a list of bare column names with no spaces (constraint lists).
+fn quote_cols_tight(cols: &[String]) -> String {
     cols.iter()
         .map(|c| quote_identifier(c))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Render a policy `TO` role list. Postgres role keywords stay unquoted; named
+/// roles are quoted. An empty list defaults to `public`.
+fn render_roles(roles: &[String]) -> String {
+    if roles.is_empty() {
+        return "public".to_string();
+    }
+    roles
+        .iter()
+        .map(|r| {
+            if matches!(
+                r.as_str(),
+                "public" | "current_role" | "current_user" | "session_user"
+            ) {
+                r.clone()
+            } else {
+                quote_identifier(r)
+            }
+        })
         .collect::<Vec<_>>()
         .join(", ")
 }
 
-/// One DDL change. Each variant renders to exactly one SQL string (the enum-value
-/// cascade variant renders several statements joined by `;\n`, since Postgres has
-/// no single statement for it).
+/// One DDL change. Each variant renders to exactly one SQL string.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DdlStatement {
     // ---- tables ----
@@ -62,6 +101,13 @@ pub enum DdlStatement {
         table: String,
         column: String,
     },
+    /// Lowercase `drop column` form drizzle emits when *recreating* a column
+    /// (e.g. a changed generated expression), as a drop+add pair.
+    DropColumnForRecreate {
+        schema: String,
+        table: String,
+        column: String,
+    },
     RenameColumn {
         schema: String,
         table: String,
@@ -73,6 +119,15 @@ pub enum DdlStatement {
         table: String,
         column: String,
         ty: String,
+    },
+    /// `ALTER COLUMN ... SET DATA TYPE <ty> USING <expr>` — the form used by the
+    /// enum recreate cascade to repoint a column at the rebuilt type.
+    SetColumnTypeUsing {
+        schema: String,
+        table: String,
+        column: String,
+        ty: String,
+        using: String,
     },
     SetColumnDefault {
         schema: String,
@@ -128,6 +183,21 @@ pub enum DdlStatement {
         table: String,
         column: String,
     },
+    /// `ALTER COLUMN ... SET GENERATED { ALWAYS | BY DEFAULT }`.
+    SetColumnIdentityGenerated {
+        schema: String,
+        table: String,
+        column: String,
+        kind: IdentityKind,
+    },
+    /// `ALTER COLUMN ... SET <clause>` for a single identity option, where
+    /// `clause` is e.g. `START WITH 100` or `CACHE 10`.
+    SetColumnIdentityOption {
+        schema: String,
+        table: String,
+        column: String,
+        clause: String,
+    },
 
     // ---- enums ----
     CreateEnum(SnapEnum),
@@ -140,19 +210,17 @@ pub enum DdlStatement {
         from: String,
         to: String,
     },
+    AlterEnumSetSchema {
+        name: String,
+        from_schema: String,
+        to_schema: String,
+    },
     AddEnumValue {
         schema: String,
         name: String,
         value: String,
         /// Insert before this existing value (else appended).
         before: Option<String>,
-    },
-    /// Postgres can't drop or reorder enum values in place; rebuild the type and
-    /// repoint the columns using it. Renders a multi-statement cascade.
-    RecreateEnumCascade {
-        enum_: SnapEnum,
-        /// `(schema, table, column)` triples that reference the enum.
-        using_columns: Vec<(String, String, String)>,
     },
 
     // ---- table-level constraints ----
@@ -263,6 +331,12 @@ pub enum DdlStatement {
         name: String,
         materialized: bool,
     },
+    RenameView {
+        schema: String,
+        from: String,
+        to: String,
+        materialized: bool,
+    },
 
     // ---- sequences ----
     CreateSequence(SnapSequence),
@@ -271,11 +345,26 @@ pub enum DdlStatement {
         name: String,
     },
     AlterSequence(SnapSequence),
+    RenameSequence {
+        schema: String,
+        from: String,
+        to: String,
+    },
+    AlterSequenceSetSchema {
+        name: String,
+        from_schema: String,
+        to_schema: String,
+    },
 
     // ---- roles ----
-    CreateRole(crate::differ::ir::SnapRole),
+    CreateRole(SnapRole),
     DropRole {
         name: String,
+    },
+    AlterRole(SnapRole),
+    RenameRole {
+        from: String,
+        to: String,
     },
 }
 
@@ -285,11 +374,11 @@ impl DdlStatement {
         match self {
             DdlStatement::CreateTable(t) => render_create_table(t),
             DdlStatement::DropTable { schema, name } => {
-                format!("DROP TABLE {};", qualify(&format!("{schema}.{name}")))
+                format!("DROP TABLE {} CASCADE;", qualify_table(schema, name))
             }
             DdlStatement::RenameTable { schema, from, to } => format!(
                 "ALTER TABLE {} RENAME TO {};",
-                qualify(&format!("{schema}.{from}")),
+                qualify_table(schema, from),
                 quote_identifier(to)
             ),
             DdlStatement::AlterTableSetSchema {
@@ -298,7 +387,7 @@ impl DdlStatement {
                 to_schema,
             } => format!(
                 "ALTER TABLE {} SET SCHEMA {};",
-                qualify(&format!("{from_schema}.{name}")),
+                qualify_table(from_schema, name),
                 quote_identifier(to_schema)
             ),
 
@@ -308,8 +397,8 @@ impl DdlStatement {
                 column,
             } => format!(
                 "ALTER TABLE {} ADD COLUMN {};",
-                qualify(&format!("{schema}.{table}")),
-                render_column_def(column)
+                qualify_table(schema, table),
+                render_column_def(table, column)
             ),
             DdlStatement::DropColumn {
                 schema,
@@ -317,7 +406,16 @@ impl DdlStatement {
                 column,
             } => format!(
                 "ALTER TABLE {} DROP COLUMN {};",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
+                quote_identifier(column)
+            ),
+            DdlStatement::DropColumnForRecreate {
+                schema,
+                table,
+                column,
+            } => format!(
+                "ALTER TABLE {} drop column {};",
+                qualify_table(schema, table),
                 quote_identifier(column)
             ),
             DdlStatement::RenameColumn {
@@ -327,7 +425,7 @@ impl DdlStatement {
                 to,
             } => format!(
                 "ALTER TABLE {} RENAME COLUMN {} TO {};",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(from),
                 quote_identifier(to)
             ),
@@ -338,9 +436,20 @@ impl DdlStatement {
                 ty,
             } => format!(
                 "ALTER TABLE {} ALTER COLUMN {} SET DATA TYPE {};",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(column),
                 ty
+            ),
+            DdlStatement::SetColumnTypeUsing {
+                schema,
+                table,
+                column,
+                ty,
+                using,
+            } => format!(
+                "ALTER TABLE {} ALTER COLUMN {} SET DATA TYPE {ty} USING {using};",
+                qualify_table(schema, table),
+                quote_identifier(column)
             ),
             DdlStatement::SetColumnDefault {
                 schema,
@@ -349,7 +458,7 @@ impl DdlStatement {
                 default,
             } => format!(
                 "ALTER TABLE {} ALTER COLUMN {} SET DEFAULT {};",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(column),
                 default
             ),
@@ -359,7 +468,7 @@ impl DdlStatement {
                 column,
             } => format!(
                 "ALTER TABLE {} ALTER COLUMN {} DROP DEFAULT;",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(column)
             ),
             DdlStatement::SetColumnNotNull {
@@ -368,7 +477,7 @@ impl DdlStatement {
                 column,
             } => format!(
                 "ALTER TABLE {} ALTER COLUMN {} SET NOT NULL;",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(column)
             ),
             DdlStatement::DropColumnNotNull {
@@ -377,7 +486,7 @@ impl DdlStatement {
                 column,
             } => format!(
                 "ALTER TABLE {} ALTER COLUMN {} DROP NOT NULL;",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(column)
             ),
             DdlStatement::SetColumnPrimaryKey {
@@ -386,7 +495,7 @@ impl DdlStatement {
                 column,
             } => format!(
                 "ALTER TABLE {} ADD PRIMARY KEY ({});",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(column)
             ),
             DdlStatement::DropColumnPrimaryKey {
@@ -395,7 +504,7 @@ impl DdlStatement {
                 constraint,
             } => format!(
                 "ALTER TABLE {} DROP CONSTRAINT {};",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(constraint)
             ),
             DdlStatement::SetColumnGenerated {
@@ -405,7 +514,7 @@ impl DdlStatement {
                 expression,
             } => format!(
                 "ALTER TABLE {} ALTER COLUMN {} ADD GENERATED ALWAYS AS ({expression}) STORED;",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(column)
             ),
             DdlStatement::DropColumnGenerated {
@@ -414,7 +523,7 @@ impl DdlStatement {
                 column,
             } => format!(
                 "ALTER TABLE {} ALTER COLUMN {} DROP EXPRESSION;",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(column)
             ),
             DdlStatement::SetColumnIdentity {
@@ -423,11 +532,10 @@ impl DdlStatement {
                 column,
                 identity,
             } => format!(
-                "ALTER TABLE {} ALTER COLUMN {} ADD GENERATED {} AS IDENTITY{};",
-                qualify(&format!("{schema}.{table}")),
+                "ALTER TABLE {} ALTER COLUMN {} ADD{};",
+                qualify_table(schema, table),
                 quote_identifier(column),
-                identity_kind_sql(identity.kind),
-                render_identity_options(identity)
+                render_identity_inline(table, column, identity)
             ),
             DdlStatement::DropColumnIdentity {
                 schema,
@@ -435,7 +543,28 @@ impl DdlStatement {
                 column,
             } => format!(
                 "ALTER TABLE {} ALTER COLUMN {} DROP IDENTITY;",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
+                quote_identifier(column)
+            ),
+            DdlStatement::SetColumnIdentityGenerated {
+                schema,
+                table,
+                column,
+                kind,
+            } => format!(
+                "ALTER TABLE {} ALTER COLUMN {} SET GENERATED {};",
+                qualify_table(schema, table),
+                quote_identifier(column),
+                kind.to_sql()
+            ),
+            DdlStatement::SetColumnIdentityOption {
+                schema,
+                table,
+                column,
+                clause,
+            } => format!(
+                "ALTER TABLE {} ALTER COLUMN {} SET {clause};",
+                qualify_table(schema, table),
                 quote_identifier(column)
             ),
 
@@ -447,6 +576,15 @@ impl DdlStatement {
                 "ALTER TYPE {} RENAME TO {};",
                 qualify(&format!("{schema}.{from}")),
                 quote_identifier(to)
+            ),
+            DdlStatement::AlterEnumSetSchema {
+                name,
+                from_schema,
+                to_schema,
+            } => format!(
+                "ALTER TYPE {} SET SCHEMA {};",
+                qualify(&format!("{from_schema}.{name}")),
+                quote_identifier(to_schema)
             ),
             DdlStatement::AddEnumValue {
                 schema,
@@ -465,10 +603,6 @@ impl DdlStatement {
                     pos
                 )
             }
-            DdlStatement::RecreateEnumCascade {
-                enum_,
-                using_columns,
-            } => render_recreate_enum_cascade(enum_, using_columns),
 
             DdlStatement::CreateCheck {
                 schema,
@@ -477,7 +611,7 @@ impl DdlStatement {
                 value,
             } => format!(
                 "ALTER TABLE {} ADD CONSTRAINT {} CHECK ({value});",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(name)
             ),
             DdlStatement::DropCheck {
@@ -486,7 +620,7 @@ impl DdlStatement {
                 name,
             } => format!(
                 "ALTER TABLE {} DROP CONSTRAINT {};",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(name)
             ),
             DdlStatement::CreateUnique {
@@ -494,15 +628,15 @@ impl DdlStatement {
                 table,
                 unique,
             } => format!(
-                "ALTER TABLE {} ADD CONSTRAINT {} UNIQUE{} ({});",
-                qualify(&format!("{schema}.{table}")),
+                "ALTER TABLE {} ADD CONSTRAINT {} UNIQUE{}({});",
+                qualify_table(schema, table),
                 quote_identifier(&unique.name),
                 if unique.nulls_not_distinct {
                     " NULLS NOT DISTINCT"
                 } else {
                     ""
                 },
-                quote_cols(&unique.columns)
+                quote_cols_tight(&unique.columns)
             ),
             DdlStatement::DropUnique {
                 schema,
@@ -510,14 +644,14 @@ impl DdlStatement {
                 name,
             } => format!(
                 "ALTER TABLE {} DROP CONSTRAINT {};",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(name)
             ),
             DdlStatement::CreateCompositePk { schema, table, pk } => format!(
-                "ALTER TABLE {} ADD CONSTRAINT {} PRIMARY KEY ({});",
-                qualify(&format!("{schema}.{table}")),
+                "ALTER TABLE {} ADD CONSTRAINT {} PRIMARY KEY({});",
+                qualify_table(schema, table),
                 quote_identifier(&pk.name),
-                quote_cols(&pk.columns)
+                quote_cols_tight(&pk.columns)
             ),
             DdlStatement::DropCompositePk {
                 schema,
@@ -525,13 +659,13 @@ impl DdlStatement {
                 name,
             } => format!(
                 "ALTER TABLE {} DROP CONSTRAINT {};",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(name)
             ),
 
             DdlStatement::CreateForeignKey { schema, table, fk } => format!(
                 "ALTER TABLE {} ADD CONSTRAINT {} {};",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(&fk.name),
                 render_fk_clause(fk)
             ),
@@ -541,11 +675,11 @@ impl DdlStatement {
                 name,
             } => format!(
                 "ALTER TABLE {} DROP CONSTRAINT {};",
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(name)
             ),
             DdlStatement::AlterForeignKey { schema, table, fk } => {
-                let t = qualify(&format!("{schema}.{table}"));
+                let t = qualify_table(schema, table);
                 format!(
                     "ALTER TABLE {t} DROP CONSTRAINT {};\nALTER TABLE {t} ADD CONSTRAINT {} {};",
                     quote_identifier(&fk.name),
@@ -574,11 +708,11 @@ impl DdlStatement {
 
             DdlStatement::EnableRls { schema, table } => format!(
                 "ALTER TABLE {} ENABLE ROW LEVEL SECURITY;",
-                qualify(&format!("{schema}.{table}"))
+                qualify_table(schema, table)
             ),
             DdlStatement::DisableRls { schema, table } => format!(
                 "ALTER TABLE {} DISABLE ROW LEVEL SECURITY;",
-                qualify(&format!("{schema}.{table}"))
+                qualify_table(schema, table)
             ),
 
             DdlStatement::CreatePolicy {
@@ -591,9 +725,9 @@ impl DdlStatement {
                 table,
                 name,
             } => format!(
-                "DROP POLICY {} ON {};",
+                "DROP POLICY {} ON {} CASCADE;",
                 quote_identifier(name),
-                qualify(&format!("{schema}.{table}"))
+                qualify_table(schema, table)
             ),
             DdlStatement::AlterPolicy {
                 schema,
@@ -608,7 +742,7 @@ impl DdlStatement {
             } => format!(
                 "ALTER POLICY {} ON {} RENAME TO {};",
                 quote_identifier(from),
-                qualify(&format!("{schema}.{table}")),
+                qualify_table(schema, table),
                 quote_identifier(to)
             ),
 
@@ -622,21 +756,48 @@ impl DdlStatement {
                 if *materialized { "MATERIALIZED " } else { "" },
                 qualify(&format!("{schema}.{name}"))
             ),
+            DdlStatement::RenameView {
+                schema,
+                from,
+                to,
+                materialized,
+            } => format!(
+                "ALTER {}VIEW {} RENAME TO {};",
+                if *materialized { "MATERIALIZED " } else { "" },
+                qualify(&format!("{schema}.{from}")),
+                quote_identifier(to)
+            ),
 
-            DdlStatement::CreateSequence(s) => render_create_sequence("CREATE SEQUENCE", s),
+            DdlStatement::CreateSequence(s) => render_sequence("CREATE SEQUENCE", s),
             DdlStatement::DropSequence { schema, name } => {
                 format!("DROP SEQUENCE {};", qualify(&format!("{schema}.{name}")))
             }
-            DdlStatement::AlterSequence(s) => render_create_sequence("ALTER SEQUENCE", s),
+            DdlStatement::AlterSequence(s) => render_sequence("ALTER SEQUENCE", s),
+            DdlStatement::RenameSequence { schema, from, to } => format!(
+                "ALTER SEQUENCE {} RENAME TO {};",
+                qualify(&format!("{schema}.{from}")),
+                quote_identifier(to)
+            ),
+            DdlStatement::AlterSequenceSetSchema {
+                name,
+                from_schema,
+                to_schema,
+            } => format!(
+                "ALTER SEQUENCE {} SET SCHEMA {};",
+                qualify(&format!("{from_schema}.{name}")),
+                quote_identifier(to_schema)
+            ),
 
             DdlStatement::CreateRole(r) => render_create_role(r),
             DdlStatement::DropRole { name } => format!("DROP ROLE {};", quote_identifier(name)),
+            DdlStatement::AlterRole(r) => render_alter_role(r),
+            DdlStatement::RenameRole { from, to } => format!(
+                "ALTER ROLE {} RENAME TO {};",
+                quote_identifier(from),
+                quote_identifier(to)
+            ),
         }
     }
-}
-
-fn identity_kind_sql(kind: IdentityKind) -> &'static str {
-    kind.to_sql()
 }
 
 fn escape_literal(s: &str) -> String {
@@ -644,20 +805,22 @@ fn escape_literal(s: &str) -> String {
 }
 
 /// Render a full column definition (`"name" type [modifiers]`), shared by
-/// `CREATE TABLE` and `ADD COLUMN`.
-pub fn render_column_def(col: &SnapColumn) -> String {
+/// `CREATE TABLE` and `ADD COLUMN`. `table` names the owning table (needed to
+/// derive an identity column's implicit sequence name).
+pub fn render_column_def(table: &str, col: &SnapColumn) -> String {
     let mut def = format!("{} {}", quote_identifier(&col.name), col.ty);
     if let Some(expr) = &col.generated {
         def.push_str(&format!(" GENERATED ALWAYS AS ({expr}) STORED"));
     }
     if let Some(id) = &col.identity {
-        def.push_str(&format!(
-            " GENERATED {} AS IDENTITY{}",
-            identity_kind_sql(id.kind),
-            render_identity_options(id)
-        ));
+        def.push_str(&render_identity_inline(table, &col.name, id));
     }
-    if col.not_null {
+    if col.primary_key {
+        def.push_str(" PRIMARY KEY");
+    }
+    // An identity column is implicitly NOT NULL — drizzle never renders the
+    // keyword for it.
+    if col.not_null && col.identity.is_none() {
         def.push_str(" NOT NULL");
     }
     if let Some(default) = &col.default {
@@ -672,71 +835,69 @@ pub fn render_column_def(col: &SnapColumn) -> String {
     def
 }
 
-fn render_identity_options(id: &SnapIdentity) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(v) = &id.increment {
-        parts.push(format!("INCREMENT BY {v}"));
-    }
-    if let Some(v) = &id.min_value {
-        parts.push(format!("MINVALUE {v}"));
-    }
-    if let Some(v) = &id.max_value {
-        parts.push(format!("MAXVALUE {v}"));
-    }
-    if let Some(v) = &id.start_with {
-        parts.push(format!("START WITH {v}"));
-    }
-    if let Some(v) = &id.cache {
-        parts.push(format!("CACHE {v}"));
-    }
+/// Render the ` GENERATED <kind> AS IDENTITY (sequence name ... )` clause, filling
+/// the Postgres `integer` identity defaults drizzle bakes in.
+fn render_identity_inline(table: &str, column: &str, id: &SnapIdentity) -> String {
+    let seq_name = format!("{table}_{column}_seq");
+    let inc = id.increment.as_deref().unwrap_or("1");
+    let min = id.min_value.as_deref().unwrap_or("1");
+    let max = id.max_value.as_deref().unwrap_or("2147483647");
+    let start = id.start_with.as_deref().unwrap_or("1");
+    let cache = id.cache.as_deref().unwrap_or("1");
+    let mut s = format!(
+        " GENERATED {} AS IDENTITY (sequence name {} INCREMENT BY {inc} MINVALUE {min} MAXVALUE {max} START WITH {start} CACHE {cache}",
+        id.kind.to_sql(),
+        quote_identifier(&seq_name)
+    );
     if id.cycle {
-        parts.push("CYCLE".to_string());
+        s.push_str(" CYCLE");
     }
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!(" ({})", parts.join(" "))
-    }
+    s.push(')');
+    s
 }
 
 fn render_fk_clause(fk: &SnapForeignKey) -> String {
     let mut clause = format!(
-        "FOREIGN KEY ({}) REFERENCES {} ({})",
-        quote_cols(&fk.columns_from),
+        "FOREIGN KEY ({}) REFERENCES {}({})",
+        quote_cols_tight(&fk.columns_from),
         qualify(&fk.table_to),
-        quote_cols(&fk.columns_to)
+        quote_cols_tight(&fk.columns_to)
     );
-    if let Some(a) = &fk.on_delete {
-        clause.push_str(&format!(" ON DELETE {a}"));
-    }
-    if let Some(a) = &fk.on_update {
-        clause.push_str(&format!(" ON UPDATE {a}"));
-    }
+    clause.push_str(&format!(
+        " ON DELETE {}",
+        fk.on_delete.as_deref().unwrap_or("no action")
+    ));
+    clause.push_str(&format!(
+        " ON UPDATE {}",
+        fk.on_update.as_deref().unwrap_or("no action")
+    ));
     clause
 }
 
 fn render_create_table(t: &SnapTable) -> String {
     let mut parts: Vec<String> = Vec::new();
-    for col in t.columns.values() {
-        parts.push(render_column_def(col));
+    let mut cols: Vec<&SnapColumn> = t.columns.values().collect();
+    cols.sort_by_key(|c| c.position);
+    for col in cols {
+        parts.push(render_column_def(&t.name, col));
     }
     for pk in t.composite_primary_keys.values() {
         parts.push(format!(
-            "CONSTRAINT {} PRIMARY KEY ({})",
+            "CONSTRAINT {} PRIMARY KEY({})",
             quote_identifier(&pk.name),
-            quote_cols(&pk.columns)
+            quote_cols_tight(&pk.columns)
         ));
     }
     for uc in t.unique_constraints.values() {
         parts.push(format!(
-            "CONSTRAINT {} UNIQUE{} ({})",
+            "CONSTRAINT {} UNIQUE{}({})",
             quote_identifier(&uc.name),
             if uc.nulls_not_distinct {
                 " NULLS NOT DISTINCT"
             } else {
                 ""
             },
-            quote_cols(&uc.columns)
+            quote_cols_tight(&uc.columns)
         ));
     }
     for cc in t.check_constraints.values() {
@@ -746,17 +907,10 @@ fn render_create_table(t: &SnapTable) -> String {
             cc.value
         ));
     }
-    for fk in t.foreign_keys.values() {
-        parts.push(format!(
-            "CONSTRAINT {} {}",
-            quote_identifier(&fk.name),
-            render_fk_clause(fk)
-        ));
-    }
     format!(
-        "CREATE TABLE {} (\n    {}\n);",
-        qualify(&t.key()),
-        parts.join(",\n    ")
+        "CREATE TABLE {} (\n\t{}\n);\n",
+        qualify_table(&t.schema, &t.name),
+        parts.join(",\n\t")
     )
 }
 
@@ -767,37 +921,7 @@ fn render_create_enum(e: &SnapEnum) -> String {
         .map(|v| format!("'{}'", escape_literal(v)))
         .collect::<Vec<_>>()
         .join(", ");
-    format!("CREATE TYPE {} AS ENUM ({});", qualify(&e.key()), values)
-}
-
-fn render_recreate_enum_cascade(
-    e: &SnapEnum,
-    using_columns: &[(String, String, String)],
-) -> String {
-    let qname = qualify(&e.key());
-    let tmp = qualify(&format!("{}.{}__new", e.schema, e.name));
-    let mut stmts: Vec<String> = Vec::new();
-    stmts.push(render_create_enum(&SnapEnum {
-        schema: e.schema.clone(),
-        name: format!("{}__new", e.name),
-        values: e.values.clone(),
-    }));
-    for (schema, table, column) in using_columns {
-        stmts.push(format!(
-            "ALTER TABLE {} ALTER COLUMN {} TYPE {} USING {}::text::{};",
-            qualify(&format!("{schema}.{table}")),
-            quote_identifier(column),
-            tmp,
-            quote_identifier(column),
-            tmp
-        ));
-    }
-    stmts.push(format!("DROP TYPE {qname};"));
-    stmts.push(format!(
-        "ALTER TYPE {tmp} RENAME TO {};",
-        quote_identifier(&e.name)
-    ));
-    stmts.join("\n")
+    format!("CREATE TYPE {} AS ENUM({});", qualify(&e.key()), values)
 }
 
 fn render_create_index(schema: &str, table: &str, index: &SnapIndex) -> String {
@@ -806,7 +930,7 @@ fn render_create_index(schema: &str, table: &str, index: &SnapIndex) -> String {
         .iter()
         .map(|c| {
             let mut s = if c.is_expression {
-                format!("({})", c.expression)
+                c.expression.clone()
             } else {
                 quote_identifier(&c.expression)
             };
@@ -814,19 +938,21 @@ fn render_create_index(schema: &str, table: &str, index: &SnapIndex) -> String {
                 s.push(' ');
                 s.push_str(op);
             }
-            s.push_str(if c.asc { " ASC" } else { " DESC" });
+            if !c.asc {
+                s.push_str(" DESC");
+            }
             if let Some(n) = &c.nulls {
                 s.push_str(&format!(" NULLS {n}"));
             }
             s
         })
         .collect::<Vec<_>>()
-        .join(", ");
+        .join(",");
     let mut sql = format!(
         "CREATE {}INDEX {} ON {} USING {} ({})",
         if index.unique { "UNIQUE " } else { "" },
         quote_identifier(&index.name),
-        qualify(&format!("{schema}.{table}")),
+        qualify_table(schema, table),
         index.method,
         cols
     );
@@ -838,20 +964,14 @@ fn render_create_index(schema: &str, table: &str, index: &SnapIndex) -> String {
 }
 
 fn render_create_policy(schema: &str, table: &str, policy: &SnapPolicy) -> String {
+    let as_ = policy.as_.map(|a| a.to_sql()).unwrap_or("PERMISSIVE");
+    let for_ = policy.for_.map(|f| f.to_sql()).unwrap_or("ALL");
     let mut sql = format!(
-        "CREATE POLICY {} ON {}",
+        "CREATE POLICY {} ON {} AS {as_} FOR {for_} TO {}",
         quote_identifier(&policy.name),
-        qualify(&format!("{schema}.{table}"))
+        qualify_table(schema, table),
+        render_roles(&policy.to)
     );
-    if let Some(a) = policy.as_ {
-        sql.push_str(&format!(" AS {}", a.to_sql()));
-    }
-    if let Some(f) = policy.for_ {
-        sql.push_str(&format!(" FOR {}", f.to_sql()));
-    }
-    if !policy.to.is_empty() {
-        sql.push_str(&format!(" TO {}", quote_cols(&policy.to)));
-    }
     if let Some(u) = &policy.using {
         sql.push_str(&format!(" USING ({u})"));
     }
@@ -864,13 +984,11 @@ fn render_create_policy(schema: &str, table: &str, policy: &SnapPolicy) -> Strin
 
 fn render_alter_policy(schema: &str, table: &str, policy: &SnapPolicy) -> String {
     let mut sql = format!(
-        "ALTER POLICY {} ON {}",
+        "ALTER POLICY {} ON {} TO {}",
         quote_identifier(&policy.name),
-        qualify(&format!("{schema}.{table}"))
+        qualify_table(schema, table),
+        render_roles(&policy.to)
     );
-    if !policy.to.is_empty() {
-        sql.push_str(&format!(" TO {}", quote_cols(&policy.to)));
-    }
     if let Some(u) = &policy.using {
         sql.push_str(&format!(" USING ({u})"));
     }
@@ -884,30 +1002,25 @@ fn render_alter_policy(schema: &str, table: &str, policy: &SnapPolicy) -> String
 fn render_create_view(v: &SnapView) -> String {
     let definition = v.definition.clone().unwrap_or_default();
     format!(
-        "CREATE {}VIEW {} AS {};",
+        "CREATE {}VIEW {} AS ({definition});",
         if v.materialized { "MATERIALIZED " } else { "" },
-        qualify(&v.key()),
-        definition
+        qualify(&v.key())
     )
 }
 
-fn render_create_sequence(verb: &str, s: &SnapSequence) -> String {
-    let mut sql = format!("{verb} {}", qualify(&s.key()));
-    if let Some(v) = &s.increment {
-        sql.push_str(&format!(" INCREMENT BY {v}"));
+fn render_sequence(verb: &str, s: &SnapSequence) -> String {
+    let inc = s.increment.as_deref().unwrap_or("1");
+    let min = s.min_value.as_deref().unwrap_or("1");
+    let max = s.max_value.as_deref().unwrap_or("9223372036854775807");
+    let cache = s.cache.as_deref().unwrap_or("1");
+    let mut sql = format!(
+        "{verb} {} INCREMENT BY {inc} MINVALUE {min} MAXVALUE {max}",
+        qualify(&s.key())
+    );
+    if let Some(start) = &s.start_with {
+        sql.push_str(&format!(" START WITH {start}"));
     }
-    if let Some(v) = &s.min_value {
-        sql.push_str(&format!(" MINVALUE {v}"));
-    }
-    if let Some(v) = &s.max_value {
-        sql.push_str(&format!(" MAXVALUE {v}"));
-    }
-    if let Some(v) = &s.start_with {
-        sql.push_str(&format!(" START WITH {v}"));
-    }
-    if let Some(v) = &s.cache {
-        sql.push_str(&format!(" CACHE {v}"));
-    }
+    sql.push_str(&format!(" CACHE {cache}"));
     if s.cycle {
         sql.push_str(" CYCLE");
     }
@@ -915,27 +1028,44 @@ fn render_create_sequence(verb: &str, s: &SnapSequence) -> String {
     sql
 }
 
-fn render_create_role(r: &crate::differ::ir::SnapRole) -> String {
-    let mut opts: Vec<String> = Vec::new();
-    opts.push(
+fn render_create_role(r: &SnapRole) -> String {
+    let mut opts: Vec<&str> = Vec::new();
+    if r.create_db {
+        opts.push("CREATEDB");
+    }
+    if r.create_role {
+        opts.push("CREATEROLE");
+    }
+    if !r.inherit {
+        opts.push("NOINHERIT");
+    }
+    if opts.is_empty() {
+        format!("CREATE ROLE {};", quote_identifier(&r.name))
+    } else {
+        format!(
+            "CREATE ROLE {} WITH {};",
+            quote_identifier(&r.name),
+            opts.join(" ")
+        )
+    }
+}
+
+fn render_alter_role(r: &SnapRole) -> String {
+    let opts = [
         if r.create_db {
             "CREATEDB"
         } else {
             "NOCREATEDB"
-        }
-        .to_string(),
-    );
-    opts.push(
+        },
         if r.create_role {
             "CREATEROLE"
         } else {
             "NOCREATEROLE"
-        }
-        .to_string(),
-    );
-    opts.push(if r.inherit { "INHERIT" } else { "NOINHERIT" }.to_string());
+        },
+        if r.inherit { "INHERIT" } else { "NOINHERIT" },
+    ];
     format!(
-        "CREATE ROLE {} WITH {};",
+        "ALTER ROLE {} WITH {};",
         quote_identifier(&r.name),
         opts.join(" ")
     )
@@ -947,12 +1077,12 @@ mod tests {
     use crate::differ::ir::{SnapColumn, SnapIndexColumn, SnapRole};
 
     #[test]
-    fn drop_table_quotes_qualified() {
+    fn drop_table_cascades_and_omits_public() {
         let s = DdlStatement::DropTable {
             schema: "public".into(),
             name: "users".into(),
         };
-        assert_eq!(s.to_sql(), r#"DROP TABLE "public"."users";"#);
+        assert_eq!(s.to_sql(), r#"DROP TABLE "users" CASCADE;"#);
     }
 
     #[test]
@@ -964,7 +1094,7 @@ mod tests {
         };
         assert_eq!(
             s.to_sql(),
-            r#"ALTER TABLE "public"."users" ADD COLUMN "email" text NOT NULL DEFAULT '';"#
+            r#"ALTER TABLE "users" ADD COLUMN "email" text NOT NULL DEFAULT '';"#
         );
     }
 
@@ -979,12 +1109,12 @@ mod tests {
         };
         assert_eq!(
             s.to_sql(),
-            r#"CREATE UNIQUE INDEX "idx_email" ON "public"."users" USING btree ("email" ASC) WHERE deleted_at IS NULL;"#
+            r#"CREATE UNIQUE INDEX "idx_email" ON "users" USING btree ("email") WHERE deleted_at IS NULL;"#
         );
     }
 
     #[test]
-    fn create_policy_renders_clauses() {
+    fn create_policy_renders_defaults() {
         let s = DdlStatement::CreatePolicy {
             schema: "public".into(),
             table: "docs".into(),
@@ -992,17 +1122,20 @@ mod tests {
         };
         assert_eq!(
             s.to_sql(),
-            r#"CREATE POLICY "p" ON "public"."docs" USING (org_id = current_org());"#
+            r#"CREATE POLICY "p" ON "docs" AS PERMISSIVE FOR ALL TO public USING (org_id = current_org());"#
         );
     }
 
     #[test]
-    fn create_role_renders_options() {
+    fn create_role_omits_with_when_default() {
+        let s = DdlStatement::CreateRole(SnapRole::new("app"));
+        assert_eq!(s.to_sql(), r#"CREATE ROLE "app";"#);
+    }
+
+    #[test]
+    fn create_role_lists_nondefault_options() {
         let s = DdlStatement::CreateRole(SnapRole::new("app").create_db(true));
-        assert_eq!(
-            s.to_sql(),
-            r#"CREATE ROLE "app" WITH CREATEDB NOCREATEROLE INHERIT;"#
-        );
+        assert_eq!(s.to_sql(), r#"CREATE ROLE "app" WITH CREATEDB;"#);
     }
 
     #[test]
