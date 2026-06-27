@@ -5,13 +5,12 @@
 //! `sqlStatements` array; we translate `schema1 -> from`, `schema2 -> to`, copy
 //! `renames` verbatim, and copy the asserted `sqlStatements` into `expected_sql`.
 //!
-//! The current [`SnapView`] IR models only `definition` + `materialized`. Anything
-//! that depends on view `WITH (...)` options (check_option / security_barrier /
-//! security_invoker / autovacuum_* / fillfactor / ...), `TABLESPACE`, `USING`
-//! (access method), `WITH NO DATA`, the drizzle `.existing()` flag, or `CREATE
-//! SCHEMA` is not representable yet and is marked [`Status::Skip`] with a reason.
-//! The error-case tests (duplicate view names that throw) are skipped too. The
-//! differ/integrator agent will promote Skip -> Supported as the IR grows.
+//! [`SnapView`] now models `WITH (...)` options (snake-cased key -> rendered value,
+//! kept alphabetical via the BTreeMap), `TABLESPACE`, `USING` (access method),
+//! `WITH NO DATA`, materialized-ness, and the drizzle `.existing()` flag (built via
+//! [`SnapView::reference`]). The only remaining [`Status::Skip`] cases are the two
+//! error-path tests (duplicate view names that drizzle rejects), which the differ
+//! does not model.
 
 use super::{DiffCase, Status};
 use postgres_kit::differ::ir::{SchemaSnapshot, SnapColumn, SnapTable, SnapView};
@@ -21,9 +20,19 @@ fn users_table() -> SnapTable {
     SnapTable::new("users").col(SnapColumn::new("id", "integer").primary_key().not_null())
 }
 
+/// `new_schema.users` — the same shape, qualified into a named schema.
+fn new_schema_users_table() -> SnapTable {
+    SnapTable::new("new_schema.users")
+        .col(SnapColumn::new("id", "integer").primary_key().not_null())
+}
+
 /// The verbatim `CREATE TABLE "users"` statement drizzle emits for `users_table`.
 const CREATE_USERS_TABLE: &str =
     "CREATE TABLE \"users\" (\n\t\"id\" integer PRIMARY KEY NOT NULL\n);\n";
+
+/// The verbatim `CREATE TABLE "new_schema"."users"` statement.
+const CREATE_NEW_SCHEMA_USERS_TABLE: &str =
+    "CREATE TABLE \"new_schema\".\"users\" (\n\t\"id\" integer PRIMARY KEY NOT NULL\n);\n";
 
 fn empty() -> SchemaSnapshot {
     SchemaSnapshot::builder().build()
@@ -69,18 +78,62 @@ pub fn cases() -> Vec<DiffCase> {
         DiffCase {
             name: "create table and view #3",
             from: empty(),
-            to: empty(),
+            to: SchemaSnapshot::builder()
+                .table(users_table())
+                .view(
+                    SnapView::new("public.some_view1", r#"SELECT * FROM "users""#)
+                        .with_option("check_option", "local")
+                        .with_option("security_barrier", "false")
+                        .with_option("security_invoker", "true"),
+                )
+                .view(
+                    SnapView::new("public.some_view2", r#"select "id" from "users""#)
+                        .with_option("check_option", "cascaded")
+                        .with_option("security_barrier", "true")
+                        .with_option("security_invoker", "false"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("view WITH options (check_option/security_*) not in IR"),
+            expected_sql: &[
+                CREATE_USERS_TABLE,
+                r#"CREATE VIEW "public"."some_view1" WITH (check_option = local, security_barrier = false, security_invoker = true) AS (SELECT * FROM "users");"#,
+                r#"CREATE VIEW "public"."some_view2" WITH (check_option = cascaded, security_barrier = true, security_invoker = false) AS (select "id" from "users");"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "create table and view #4",
             from: empty(),
-            to: empty(),
+            to: SchemaSnapshot::builder()
+                .schema("new_schema")
+                .table(new_schema_users_table())
+                .view(
+                    SnapView::new(
+                        "new_schema.some_view1",
+                        r#"SELECT * FROM "new_schema"."users""#,
+                    )
+                    .with_option("check_option", "local")
+                    .with_option("security_barrier", "false")
+                    .with_option("security_invoker", "true"),
+                )
+                .view(
+                    SnapView::new(
+                        "new_schema.some_view2",
+                        r#"select "id" from "new_schema"."users""#,
+                    )
+                    .with_option("check_option", "cascaded")
+                    .with_option("security_barrier", "true")
+                    .with_option("security_invoker", "false"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("CREATE SCHEMA + view WITH options not in IR"),
+            expected_sql: &[
+                r#"CREATE SCHEMA IF NOT EXISTS "new_schema";"#,
+                CREATE_NEW_SCHEMA_USERS_TABLE,
+                r#"CREATE VIEW "new_schema"."some_view1" WITH (check_option = local, security_barrier = false, security_invoker = true) AS (SELECT * FROM "new_schema"."users");"#,
+                r#"CREATE VIEW "new_schema"."some_view2" WITH (check_option = cascaded, security_barrier = true, security_invoker = false) AS (select "id" from "new_schema"."users");"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "create table and view #5",
@@ -93,18 +146,31 @@ pub fn cases() -> Vec<DiffCase> {
         DiffCase {
             name: "create table and view #6",
             from: empty(),
-            to: empty(),
+            to: SchemaSnapshot::builder()
+                .table(users_table())
+                .view(
+                    SnapView::new("public.some_view", r#"SELECT * FROM "users""#)
+                        .with_option("check_option", "cascaded"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("view WITH options (check_option) not in IR"),
+            expected_sql: &[
+                CREATE_USERS_TABLE,
+                r#"CREATE VIEW "public"."some_view" WITH (check_option = cascaded) AS (SELECT * FROM "users");"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "create view with existing flag",
             from: empty(),
-            to: empty(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.some_view").with_option("check_option", "cascaded"),
+                )
+                .build(),
             renames: &[],
             expected_sql: &[],
-            status: Status::Skip("drizzle .existing() flag not in IR"),
+            status: Status::Supported,
         },
         // ---- create materialized view ----
         DiffCase {
@@ -140,10 +206,42 @@ pub fn cases() -> Vec<DiffCase> {
         DiffCase {
             name: "create table and materialized view #3",
             from: empty(),
-            to: empty(),
+            to: SchemaSnapshot::builder()
+                .table(users_table())
+                .view(SnapView::new("public.some_view1", r#"SELECT * FROM "users""#).materialized())
+                .view(
+                    SnapView::new("public.some_view2", r#"select "id" from "users""#)
+                        .materialized()
+                        .using("heap")
+                        .tablespace("some_tablespace")
+                        .with_no_data()
+                        .with_option("autovacuum_enabled", "true")
+                        .with_option("autovacuum_freeze_max_age", "1")
+                        .with_option("autovacuum_freeze_min_age", "1")
+                        .with_option("autovacuum_freeze_table_age", "1")
+                        .with_option("autovacuum_multixact_freeze_max_age", "1")
+                        .with_option("autovacuum_multixact_freeze_min_age", "1")
+                        .with_option("autovacuum_multixact_freeze_table_age", "1")
+                        .with_option("autovacuum_vacuum_cost_delay", "1")
+                        .with_option("autovacuum_vacuum_cost_limit", "1")
+                        .with_option("autovacuum_vacuum_scale_factor", "1")
+                        .with_option("autovacuum_vacuum_threshold", "1")
+                        .with_option("fillfactor", "1")
+                        .with_option("log_autovacuum_min_duration", "1")
+                        .with_option("parallel_workers", "1")
+                        .with_option("toast_tuple_target", "1")
+                        .with_option("user_catalog_table", "true")
+                        .with_option("vacuum_index_cleanup", "off")
+                        .with_option("vacuum_truncate", "false"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("materialized view WITH options/TABLESPACE/USING not in IR"),
+            expected_sql: &[
+                CREATE_USERS_TABLE,
+                r#"CREATE MATERIALIZED VIEW "public"."some_view1" AS (SELECT * FROM "users");"#,
+                r#"CREATE MATERIALIZED VIEW "public"."some_view2" USING "heap" WITH (autovacuum_enabled = true, autovacuum_freeze_max_age = 1, autovacuum_freeze_min_age = 1, autovacuum_freeze_table_age = 1, autovacuum_multixact_freeze_max_age = 1, autovacuum_multixact_freeze_min_age = 1, autovacuum_multixact_freeze_table_age = 1, autovacuum_vacuum_cost_delay = 1, autovacuum_vacuum_cost_limit = 1, autovacuum_vacuum_scale_factor = 1, autovacuum_vacuum_threshold = 1, fillfactor = 1, log_autovacuum_min_duration = 1, parallel_workers = 1, toast_tuple_target = 1, user_catalog_table = true, vacuum_index_cleanup = off, vacuum_truncate = false) TABLESPACE some_tablespace AS (select "id" from "users") WITH NO DATA;"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "create table and materialized view #4",
@@ -156,18 +254,34 @@ pub fn cases() -> Vec<DiffCase> {
         DiffCase {
             name: "create table and materialized view #5",
             from: empty(),
-            to: empty(),
+            to: SchemaSnapshot::builder()
+                .table(users_table())
+                .view(
+                    SnapView::new("public.some_view", r#"SELECT * FROM "users""#)
+                        .materialized()
+                        .with_option("autovacuum_freeze_min_age", "14"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("materialized view WITH options not in IR"),
+            expected_sql: &[
+                CREATE_USERS_TABLE,
+                r#"CREATE MATERIALIZED VIEW "public"."some_view" WITH (autovacuum_freeze_min_age = 14) AS (SELECT * FROM "users");"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "create materialized view with existing flag",
             from: empty(),
-            to: empty(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.some_view")
+                        .materialized()
+                        .with_option("autovacuum_enabled", "true"),
+                )
+                .build(),
             renames: &[],
             expected_sql: &[],
-            status: Status::Skip("drizzle .existing() flag not in IR"),
+            status: Status::Supported,
         },
         // ---- drop view ----
         DiffCase {
@@ -186,11 +300,13 @@ pub fn cases() -> Vec<DiffCase> {
         },
         DiffCase {
             name: "drop view with existing flag",
-            from: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view"))
+                .build(),
             to: empty(),
             renames: &[],
             expected_sql: &[],
-            status: Status::Skip("drizzle .existing() flag not in IR"),
+            status: Status::Supported,
         },
         DiffCase {
             name: "drop materialized view #1",
@@ -205,11 +321,13 @@ pub fn cases() -> Vec<DiffCase> {
         },
         DiffCase {
             name: "drop materialized view with existing flag",
-            from: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view").materialized())
+                .build(),
             to: empty(),
             renames: &[],
             expected_sql: &[],
-            status: Status::Skip("drizzle .existing() flag not in IR"),
+            status: Status::Supported,
         },
         // ---- rename view ----
         DiffCase {
@@ -232,11 +350,15 @@ pub fn cases() -> Vec<DiffCase> {
         },
         DiffCase {
             name: "rename view with existing flag",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view"))
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.new_some_view"))
+                .build(),
             renames: &["public.some_view->public.new_some_view"],
             expected_sql: &[],
-            status: Status::Skip("drizzle .existing() flag not in IR"),
+            status: Status::Supported,
         },
         DiffCase {
             name: "rename materialized view #1",
@@ -257,291 +379,714 @@ pub fn cases() -> Vec<DiffCase> {
         },
         DiffCase {
             name: "rename materialized view with existing flag",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view").materialized())
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.new_some_view").materialized())
+                .build(),
             renames: &["public.some_view->public.new_some_view"],
             expected_sql: &[],
-            status: Status::Skip("drizzle .existing() flag not in IR"),
+            status: Status::Supported,
         },
         // ---- alter view schema ----
         DiffCase {
             name: "view alter schema",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::new(
+                    "public.some_view",
+                    r#"SELECT * FROM "users""#,
+                ))
+                .build(),
+            to: SchemaSnapshot::builder()
+                .schema("new_schema")
+                .view(SnapView::new(
+                    "new_schema.some_view",
+                    r#"SELECT * FROM "users""#,
+                ))
+                .build(),
             renames: &["public.some_view->new_schema.some_view"],
-            expected_sql: &[],
-            status: Status::Skip("CREATE SCHEMA + SET SCHEMA not in IR"),
+            expected_sql: &[
+                r#"CREATE SCHEMA IF NOT EXISTS "new_schema";"#,
+                r#"ALTER VIEW "public"."some_view" SET SCHEMA "new_schema";"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "view alter schema with existing flag",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view"))
+                .build(),
+            to: SchemaSnapshot::builder()
+                .schema("new_schema")
+                .view(SnapView::reference("new_schema.some_view"))
+                .build(),
             renames: &["public.some_view->new_schema.some_view"],
-            expected_sql: &[],
-            status: Status::Skip("CREATE SCHEMA + drizzle .existing() flag not in IR"),
+            expected_sql: &[r#"CREATE SCHEMA IF NOT EXISTS "new_schema";"#],
+            status: Status::Supported,
         },
         DiffCase {
             name: "view alter schema for materialized",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::new("public.some_view", r#"SELECT * FROM "users""#).materialized())
+                .build(),
+            to: SchemaSnapshot::builder()
+                .schema("new_schema")
+                .view(
+                    SnapView::new("new_schema.some_view", r#"SELECT * FROM "users""#)
+                        .materialized(),
+                )
+                .build(),
             renames: &["public.some_view->new_schema.some_view"],
-            expected_sql: &[],
-            status: Status::Skip("CREATE SCHEMA + SET SCHEMA not in IR"),
+            expected_sql: &[
+                r#"CREATE SCHEMA IF NOT EXISTS "new_schema";"#,
+                r#"ALTER MATERIALIZED VIEW "public"."some_view" SET SCHEMA "new_schema";"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "view alter schema for materialized with existing flag",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view").materialized())
+                .build(),
+            to: SchemaSnapshot::builder()
+                .schema("new_schema")
+                .view(SnapView::reference("new_schema.some_view").materialized())
+                .build(),
             renames: &["public.some_view->new_schema.some_view"],
-            expected_sql: &[],
-            status: Status::Skip("CREATE SCHEMA + drizzle .existing() flag not in IR"),
+            expected_sql: &[r#"CREATE SCHEMA IF NOT EXISTS "new_schema";"#],
+            status: Status::Supported,
         },
         // ---- add / drop / alter WITH options ----
         DiffCase {
             name: "add with option to view #1",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::new(
+                    "public.some_view",
+                    r#"select "id" from "users""#,
+                ))
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select "id" from "users""#)
+                        .with_option("check_option", "cascaded")
+                        .with_option("security_barrier", "true"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("view WITH options not in IR"),
+            expected_sql: &[
+                r#"ALTER VIEW "public"."some_view" SET (check_option = cascaded, security_barrier = true);"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "add with option to view with existing flag",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view"))
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.some_view")
+                        .with_option("check_option", "cascaded")
+                        .with_option("security_barrier", "true"),
+                )
+                .build(),
             renames: &[],
             expected_sql: &[],
-            status: Status::Skip("view WITH options + .existing() flag not in IR"),
+            status: Status::Supported,
         },
         DiffCase {
             name: "add with option to materialized view #1",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select "id" from "users""#).materialized(),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select "id" from "users""#)
+                        .materialized()
+                        .with_option("autovacuum_multixact_freeze_max_age", "3"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("materialized view WITH options not in IR"),
+            expected_sql: &[
+                r#"ALTER MATERIALIZED VIEW "public"."some_view" SET (autovacuum_multixact_freeze_max_age = 3);"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "add with option to materialized view with existing flag",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view").materialized())
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.some_view")
+                        .materialized()
+                        .with_option("autovacuum_multixact_freeze_max_age", "3"),
+                )
+                .build(),
             renames: &[],
             expected_sql: &[],
-            status: Status::Skip("materialized view WITH options + .existing() flag not in IR"),
+            status: Status::Supported,
         },
         DiffCase {
             name: "drop with option from view #1",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select "id" from "users""#)
+                        .with_option("check_option", "cascaded")
+                        .with_option("security_barrier", "true")
+                        .with_option("security_invoker", "true"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(SnapView::new(
+                    "public.some_view",
+                    r#"select "id" from "users""#,
+                ))
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("view WITH options not in IR"),
+            expected_sql: &[
+                r#"ALTER VIEW "public"."some_view" RESET (check_option, security_barrier, security_invoker);"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "drop with option from view with existing flag",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.some_view")
+                        .with_option("check_option", "cascaded")
+                        .with_option("security_barrier", "true")
+                        .with_option("security_invoker", "true"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view"))
+                .build(),
             renames: &[],
             expected_sql: &[],
-            status: Status::Skip("view WITH options + .existing() flag not in IR"),
+            status: Status::Supported,
         },
         DiffCase {
             name: "drop with option from materialized view #1",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select "id" from "users""#)
+                        .materialized()
+                        .with_option("autovacuum_enabled", "true")
+                        .with_option("autovacuum_freeze_max_age", "10"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select "id" from "users""#).materialized(),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("materialized view WITH options not in IR"),
+            expected_sql: &[
+                r#"ALTER MATERIALIZED VIEW "public"."some_view" RESET (autovacuum_enabled, autovacuum_freeze_max_age);"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "drop with option from materialized view with existing flag",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.some_view")
+                        .materialized()
+                        .with_option("autovacuum_enabled", "true")
+                        .with_option("autovacuum_freeze_max_age", "10"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view").materialized())
+                .build(),
             renames: &[],
             expected_sql: &[],
-            status: Status::Skip("materialized view WITH options + .existing() flag not in IR"),
+            status: Status::Supported,
         },
         DiffCase {
             name: "alter with option in view #1",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select "id" from "users""#)
+                        .with_option("security_barrier", "true")
+                        .with_option("security_invoker", "true"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select "id" from "users""#)
+                        .with_option("security_barrier", "true"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("view WITH options not in IR"),
+            expected_sql: &[r#"ALTER VIEW "public"."some_view" RESET (security_invoker);"#],
+            status: Status::Supported,
         },
         DiffCase {
             name: "alter with option in view with existing flag",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.some_view")
+                        .with_option("security_barrier", "true")
+                        .with_option("security_invoker", "true"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.some_view").with_option("security_barrier", "true"),
+                )
+                .build(),
             renames: &[],
             expected_sql: &[],
-            status: Status::Skip("view WITH options + .existing() flag not in IR"),
+            status: Status::Supported,
         },
         DiffCase {
             name: "alter with option in materialized view #1",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select "id" from "users""#)
+                        .materialized()
+                        .with_option("autovacuum_enabled", "true")
+                        .with_option("autovacuum_vacuum_scale_factor", "1"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select "id" from "users""#)
+                        .materialized()
+                        .with_option("autovacuum_enabled", "true"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("materialized view WITH options not in IR"),
+            expected_sql: &[
+                r#"ALTER MATERIALIZED VIEW "public"."some_view" RESET (autovacuum_vacuum_scale_factor);"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "alter with option in materialized view with existing flag",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.some_view")
+                        .materialized()
+                        .with_option("autovacuum_enabled", "true")
+                        .with_option("autovacuum_vacuum_scale_factor", "1"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.some_view")
+                        .materialized()
+                        .with_option("autovacuum_enabled", "true"),
+                )
+                .build(),
             renames: &[],
             expected_sql: &[],
-            status: Status::Skip("materialized view WITH options + .existing() flag not in IR"),
+            status: Status::Supported,
         },
         DiffCase {
             name: "alter with option in view #2",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select distinct "id" from "users""#)
+                        .with_option("check_option", "local")
+                        .with_option("security_barrier", "true")
+                        .with_option("security_invoker", "true"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select distinct "id" from "users""#)
+                        .with_option("check_option", "cascaded")
+                        .with_option("security_barrier", "true")
+                        .with_option("security_invoker", "true"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("view WITH options not in IR"),
+            expected_sql: &[r#"ALTER VIEW "public"."some_view" SET (check_option = cascaded);"#],
+            status: Status::Supported,
         },
         DiffCase {
             name: "alter with option in materialized view #2",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select "id" from "users""#)
+                        .materialized()
+                        .with_option("autovacuum_enabled", "true")
+                        .with_option("fillfactor", "1"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", r#"select "id" from "users""#)
+                        .materialized()
+                        .with_option("autovacuum_enabled", "false")
+                        .with_option("fillfactor", "1"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("materialized view WITH options not in IR"),
+            expected_sql: &[
+                r#"ALTER MATERIALIZED VIEW "public"."some_view" SET (autovacuum_enabled = false);"#,
+            ],
+            status: Status::Supported,
         },
-        // ---- alter ".as" definition (all carry WITH options) ----
+        // ---- alter ".as" definition (drop + recreate, carrying WITH options) ----
         DiffCase {
             name: "alter view \".as\" value",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT '123'")
+                        .with_option("check_option", "local")
+                        .with_option("security_barrier", "true")
+                        .with_option("security_invoker", "true"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT '1234'")
+                        .with_option("check_option", "local")
+                        .with_option("security_barrier", "true")
+                        .with_option("security_invoker", "true"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("view WITH options not in IR (drop+recreate carries options)"),
+            expected_sql: &[
+                r#"DROP VIEW "public"."some_view";"#,
+                r#"CREATE VIEW "public"."some_view" WITH (check_option = local, security_barrier = true, security_invoker = true) AS (SELECT '1234');"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "alter view \".as\" value with existing flag",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view"))
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view"))
+                .build(),
             renames: &[],
             expected_sql: &[],
-            status: Status::Skip("view WITH options + .existing() flag not in IR"),
+            status: Status::Supported,
         },
         DiffCase {
             name: "alter materialized view \".as\" value",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT '123'")
+                        .materialized()
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT '1234'")
+                        .materialized()
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip(
-                "materialized view WITH options not in IR (drop+recreate carries options)",
-            ),
+            expected_sql: &[
+                r#"DROP MATERIALIZED VIEW "public"."some_view";"#,
+                r#"CREATE MATERIALIZED VIEW "public"."some_view" WITH (autovacuum_vacuum_cost_limit = 1) AS (SELECT '1234');"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "alter materialized view \".as\" value with existing flag",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view").materialized())
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(SnapView::reference("public.some_view").materialized())
+                .build(),
             renames: &[],
             expected_sql: &[],
-            status: Status::Skip("materialized view WITH options + .existing() flag not in IR"),
+            status: Status::Supported,
         },
         DiffCase {
             name: "drop existing flag",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.some_view")
+                        .materialized()
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("drizzle .existing() flag + WITH options not in IR"),
+            expected_sql: &[
+                r#"DROP MATERIALIZED VIEW "public"."some_view";"#,
+                r#"CREATE MATERIALIZED VIEW "public"."some_view" WITH (autovacuum_vacuum_cost_limit = 1) AS (SELECT 'asd');"#,
+            ],
+            status: Status::Supported,
         },
-        // ---- tablespace ----
+        // ---- tablespace (materialized) ----
         DiffCase {
             name: "alter tablespace - materialize",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .tablespace("some_tablespace")
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .tablespace("new_tablespace")
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("materialized view TABLESPACE not in IR"),
+            expected_sql: &[
+                r#"ALTER MATERIALIZED VIEW "public"."some_view" SET TABLESPACE new_tablespace;"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "set tablespace - materialize",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .tablespace("new_tablespace")
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("materialized view TABLESPACE not in IR"),
+            expected_sql: &[
+                r#"ALTER MATERIALIZED VIEW "public"."some_view" SET TABLESPACE new_tablespace;"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "drop tablespace - materialize",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .tablespace("new_tablespace")
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("materialized view TABLESPACE not in IR"),
+            expected_sql: &[
+                r#"ALTER MATERIALIZED VIEW "public"."some_view" SET TABLESPACE pg_default;"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "set existing - materialized",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .tablespace("new_tablespace")
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.new_some_view")
+                        .materialized()
+                        .with_no_data()
+                        .with_option("autovacuum_freeze_min_age", "1")
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
             renames: &["public.some_view->public.new_some_view"],
             expected_sql: &[],
-            status: Status::Skip("drizzle .existing() flag + TABLESPACE/WITH options not in IR"),
+            status: Status::Supported,
         },
         DiffCase {
             name: "drop existing - materialized",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.some_view")
+                        .materialized()
+                        .tablespace("new_tablespace")
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .with_no_data()
+                        .with_option("autovacuum_freeze_min_age", "1")
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("no concrete sqlStatements asserted (length-only) + .existing()"),
+            expected_sql: &[
+                r#"DROP MATERIALIZED VIEW "public"."some_view";"#,
+                r#"CREATE MATERIALIZED VIEW "public"."some_view" WITH (autovacuum_freeze_min_age = 1, autovacuum_vacuum_cost_limit = 1) AS (SELECT 'asd') WITH NO DATA;"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "set existing",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .with_option("check_option", "cascaded"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::reference("public.new_some_view")
+                        .with_option("check_option", "cascaded")
+                        .with_option("security_barrier", "true"),
+                )
+                .build(),
             renames: &["public.some_view->public.new_some_view"],
             expected_sql: &[],
-            status: Status::Skip("drizzle .existing() flag + WITH options not in IR"),
+            status: Status::Supported,
         },
-        // ---- USING (access method) ----
+        // ---- USING (access method, materialized) ----
         DiffCase {
             name: "alter using - materialize",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .tablespace("some_tablespace")
+                        .using("some_using")
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .tablespace("some_tablespace")
+                        .using("new_using")
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("materialized view USING (access method) not in IR"),
+            expected_sql: &[
+                r#"ALTER MATERIALIZED VIEW "public"."some_view" SET ACCESS METHOD "new_using";"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "set using - materialize",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .using("new_using")
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("materialized view USING (access method) not in IR"),
+            expected_sql: &[
+                r#"ALTER MATERIALIZED VIEW "public"."some_view" SET ACCESS METHOD "new_using";"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "drop using - materialize",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .using("new_using")
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.some_view", "SELECT 'asd'")
+                        .materialized()
+                        .with_option("autovacuum_vacuum_cost_limit", "1"),
+                )
+                .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("materialized view USING (access method) not in IR"),
+            expected_sql: &[
+                r#"ALTER MATERIALIZED VIEW "public"."some_view" SET ACCESS METHOD "heap";"#,
+            ],
+            status: Status::Supported,
         },
         // ---- combined rename + alter ----
         DiffCase {
             name: "rename view and alter view",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .view(SnapView::new(
+                    "public.some_view",
+                    r#"SELECT * FROM "users""#,
+                ))
+                .build(),
+            to: SchemaSnapshot::builder()
+                .view(
+                    SnapView::new("public.new_some_view", r#"SELECT * FROM "users""#)
+                        .with_option("check_option", "cascaded"),
+                )
+                .build(),
             renames: &["public.some_view->public.new_some_view"],
-            expected_sql: &[],
-            status: Status::Skip("view WITH options not in IR (rename + SET option)"),
+            expected_sql: &[
+                r#"ALTER VIEW "public"."some_view" RENAME TO "new_some_view";"#,
+                r#"ALTER VIEW "public"."new_some_view" SET (check_option = cascaded);"#,
+            ],
+            status: Status::Supported,
         },
         DiffCase {
             name: "moved schema and alter view",
-            from: empty(),
-            to: empty(),
+            from: SchemaSnapshot::builder()
+                .schema("my_schema")
+                .view(SnapView::new(
+                    "public.some_view",
+                    r#"SELECT * FROM "users""#,
+                ))
+                .build(),
+            to: SchemaSnapshot::builder()
+                .schema("my_schema")
+                .view(
+                    SnapView::new("my_schema.some_view", r#"SELECT * FROM "users""#)
+                        .with_option("check_option", "cascaded"),
+                )
+                .build(),
             renames: &["public.some_view->my_schema.some_view"],
-            expected_sql: &[],
-            status: Status::Skip("SET SCHEMA + view WITH options not in IR"),
+            expected_sql: &[
+                r#"ALTER VIEW "public"."some_view" SET SCHEMA "my_schema";"#,
+                r#"ALTER VIEW "my_schema"."some_view" SET (check_option = cascaded);"#,
+            ],
+            status: Status::Supported,
         },
     ]
 }

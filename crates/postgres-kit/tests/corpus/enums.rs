@@ -333,7 +333,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum\" USING \"column\"::\"public\".\"enum\";",
                 "ALTER TABLE \"new_schema\".\"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum\" USING \"column\"::\"public\".\"enum\";",
             ],
-            status: Status::Skip("enum value removal with dependent table columns — cross-category"),
+            status: Status::Supported,
         },
         // shuffle enum values — reorder forces recreate with dependent columns.
         DiffCase {
@@ -357,7 +357,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum\" USING \"column\"::\"public\".\"enum\";",
                 "ALTER TABLE \"new_schema\".\"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum\" USING \"column\"::\"public\".\"enum\";",
             ],
-            status: Status::Skip("enum value reorder with dependent table columns — cross-category"),
+            status: Status::Supported,
         },
         // enums as ts enum — create enum from a TS enum (same as create).
         DiffCase {
@@ -801,7 +801,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DEFAULT 'value2'::\"public\".\"enum1\";",
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum1\" USING \"column\"::\"public\".\"enum1\";",
             ],
-            status: Status::Skip("enum recreate + column data-type change + default — cross-category"),
+            status: Status::Supported,
         },
     ]
 }

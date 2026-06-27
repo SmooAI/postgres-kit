@@ -62,6 +62,15 @@ pub struct PolicyRename {
     pub to: String,
 }
 
+/// An independent (schema-level) policy rename.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndPolicyRename {
+    pub schema: String,
+    pub table: String,
+    pub from: String,
+    pub to: String,
+}
+
 /// All parsed rename hints, grouped by kind.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RenameHints {
@@ -69,6 +78,7 @@ pub struct RenameHints {
     pub columns: Vec<ColumnRename>,
     pub enums: Vec<EnumRename>,
     pub policies: Vec<PolicyRename>,
+    pub ind_policies: Vec<IndPolicyRename>,
     pub roles: Vec<RoleRename>,
 }
 
@@ -124,6 +134,18 @@ impl RenameHints {
             .iter()
             .find(|r| r.schema == schema && r.table == table && r.from == from)
     }
+
+    /// Look up an independent-policy rename by its source `(schema, table, from)`.
+    pub fn find_ind_policy_rename(
+        &self,
+        schema: &str,
+        table: &str,
+        from: &str,
+    ) -> Option<&IndPolicyRename> {
+        self.ind_policies
+            .iter()
+            .find(|r| r.schema == schema && r.table == table && r.from == from)
+    }
 }
 
 fn parse_one(item: &str, hints: &mut RenameHints) -> Result<(), SchemaError> {
@@ -137,9 +159,12 @@ fn parse_one(item: &str, hints: &mut RenameHints) -> Result<(), SchemaError> {
     let (kind, body) = match item.split_once(':') {
         Some(("enum", rest)) if rest.contains("->") => (Kind::Enum, rest),
         Some(("policy", rest)) if rest.contains("->") => (Kind::Policy, rest),
+        Some(("ind_policy", rest)) if rest.contains("->") => (Kind::IndPolicy, rest),
         Some(("table", rest)) if rest.contains("->") => (Kind::Table, rest),
         Some(("column", rest)) if rest.contains("->") => (Kind::Column, rest),
-        Some(("enum" | "policy" | "table" | "column", _)) => return Err(invalid("missing '->'")),
+        Some(("enum" | "policy" | "ind_policy" | "table" | "column", _)) => {
+            return Err(invalid("missing '->'"))
+        }
         Some((_, _)) if !item.contains("->") => return Err(invalid("missing '->'")),
         Some((other, _)) if !other.is_empty() && !other.contains('.') => {
             return Err(invalid("unknown rename hint prefix"))
@@ -244,6 +269,22 @@ fn parse_one(item: &str, hints: &mut RenameHints) -> Result<(), SchemaError> {
                 to: to_parts[2].to_string(),
             });
         }
+        Kind::IndPolicy => {
+            if from_parts.len() != 3 {
+                return Err(invalid(
+                    "ind_policy rename must be schema.table.policy->schema.table.policy",
+                ));
+            }
+            if from_parts[0] != to_parts[0] || from_parts[1] != to_parts[1] {
+                return Err(invalid("ind_policy rename cannot change schema or table"));
+            }
+            hints.ind_policies.push(IndPolicyRename {
+                schema: from_parts[0].to_string(),
+                table: from_parts[1].to_string(),
+                from: from_parts[2].to_string(),
+                to: to_parts[2].to_string(),
+            });
+        }
         Kind::Untagged => unreachable!("resolved above"),
     }
 
@@ -257,6 +298,7 @@ enum Kind {
     Column,
     Enum,
     Policy,
+    IndPolicy,
     Role,
 }
 

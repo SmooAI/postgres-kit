@@ -54,6 +54,7 @@ pub fn diff_with_raw_sql(
     sequences::diff(&mut plan, from, to, hints);
     roles::diff(&mut plan, from, to, hints);
     tables::diff(&mut plan, from, to, hints);
+    policies::diff_independent(&mut plan, from, to, hints);
     views::diff(&mut plan, from, to, hints);
 
     for sql in raw_sql {

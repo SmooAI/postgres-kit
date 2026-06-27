@@ -1,6 +1,14 @@
 //! Identity-column helper (driven by the [`super::columns`] pass). Diffs a
 //! column's `GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY` declaration: add,
 //! drop, or per-option alteration (`SET GENERATED ...`, `SET START WITH`, etc).
+//!
+//! A custom identity *sequence name* (drizzle's `{ name: 'custom_seq' }`) rides
+//! on [`SnapIdentity::name`]; the add/drop paths below carry the whole
+//! `SnapIdentity` through to the statement layer, which renders the custom name
+//! inline (falling back to the Postgres-implicit `{table}_{column}_seq` when it
+//! is `None`). Postgres has no in-place "rename the identity sequence" DDL, so a
+//! pure name change on an existing identity is intentionally a no-op here (it is
+//! not in drizzle-kit's `sqlStatements` either).
 
 use crate::differ::ir::SnapColumn;
 use crate::differ::statement::DdlStatement;

@@ -26,8 +26,13 @@ public crate carries no SmooAI specifics.
   enums, RLS policies, roles, sequences, and views. _Cargo feature: `differ`
   (default)._
 - ✅ Conformance corpus ported from Drizzle Kit's permissively-licensed Postgres
-  fixtures (snapshot-in → expected-DDL-out): **247 cases, 125 asserted, 122
+  fixtures (snapshot-in → expected-DDL-out): **258 cases, 198 asserted, 60
   tracked `Skip`** (deferred categories below).
+- ✅ **Phase-2 deferred-corpus promotion**: views (`WITH` options / `TABLESPACE`
+  / `USING` / `SET SCHEMA` / `.existing()` reference / DROP-before-CREATE
+  recreate), enum recreate cascade, sequences, identity (custom sequence name +
+  `START WITH` → `MINVALUE` fallback), FK alter (DROP+ADD), index drop
+  (`public`-implicit), and independent (schema-level) policies (`SnapIndPolicy`).
 - ✅ **Non-`public` schema support**: `CREATE SCHEMA` / `DROP SCHEMA` generation
   (`SchemaSnapshot.schemas`, ordered first/last), the schema-qualify fix
   (`to_create_table_sql` + all emitters share `qualify_relation`: `public`
@@ -64,19 +69,20 @@ public crate carries no SmooAI specifics.
 
 ## Deferred — differ corpus `Skip`s (next promotion passes)
 
-Tracked by the 122 `Skip` cases in `tests/differ_corpus.rs`:
+Tracked by the 60 remaining `Skip` cases in `tests/differ_corpus.rs`:
 
-- Cross-category enum↔column moves: enum value add/remove/reorder when dependent
-  table **columns** change data type (the largest skip cluster).
-- View / materialized-view `WITH` options, `TABLESPACE`, `USING` access method,
-  `SET SCHEMA`, and the drizzle `.existing()` flag — not modeled in the IR. (The
-  `CREATE SCHEMA` half of these skips is now done; what remains is the view
-  `WITH`-options / `.existing()` modeling they are bundled with.)
-- Policies linked to tables absent from the snapshot (drizzle
-  `create_ind_policy` / `alter_ind_policy` on non-schema tables).
-- Custom identity sequence names (`SnapIdentity` has no name field).
-- Multi-table-create FK/index emission ordering (declaration order vs
-  `BTreeMap`-sorted) and composite-PK DROP+ADD joined into one drizzle breakpoint.
+- **Columns category** (the largest remaining cluster): column add / default add /
+  data-type change — including every enum↔standard and enum↔enum data-type-change
+  variant — deferred to a dedicated columns-promotion pass.
+- Multi-construct **ordering** mismatches vs drizzle's insertion order:
+  multi-table-create FK/index emission (declaration order vs `BTreeMap`-sorted),
+  composite-PK DROP+ADD joined into one drizzle breakpoint, and multi-policy
+  creation order (name-sorted vs insertion order).
+- **Tables/schema** "statements-only encoding" goldens (add/drop/move table,
+  multiproject schema) whose fixtures assert statements, not `sqlStatements`.
+- Enum **schema rename** (`ALTER SCHEMA`) — schemas not modeled as renameable IR
+  entities.
+- Error-case fixtures (duplicate view / constraint names drizzle rejects).
 
 ## Non-goals (for now)
 

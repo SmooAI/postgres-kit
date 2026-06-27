@@ -44,6 +44,7 @@ pub struct Plan {
     // before their table, dependents before tables
     pub disable_rls: Vec<DdlStatement>,
     pub drop_policies: Vec<DdlStatement>,
+    pub drop_ind_policies: Vec<DdlStatement>,
     pub drop_foreign_keys: Vec<DdlStatement>,
     pub drop_indexes: Vec<DdlStatement>,
     pub drop_checks: Vec<DdlStatement>,
@@ -71,13 +72,18 @@ pub struct Plan {
     // RLS / policies (after tables exist)
     pub enable_rls: Vec<DdlStatement>,
     pub create_policies: Vec<DdlStatement>,
+    pub create_ind_policies: Vec<DdlStatement>,
     pub alter_policies: Vec<DdlStatement>,
+    pub alter_ind_policies: Vec<DdlStatement>,
     pub rename_policies: Vec<DdlStatement>,
+    pub rename_ind_policies: Vec<DdlStatement>,
 
     // views
     pub create_views: Vec<DdlStatement>,
     pub drop_views: Vec<DdlStatement>,
     pub rename_views: Vec<DdlStatement>,
+    pub view_set_schema: Vec<DdlStatement>,
+    pub alter_views: Vec<DdlStatement>,
 
     // enums dropped last
     pub drop_enums: Vec<DdlStatement>,
@@ -89,7 +95,7 @@ pub struct Plan {
 impl Plan {
     /// Concatenate every bucket in the fixed phase order.
     pub fn assemble(self) -> Vec<DdlStatement> {
-        let buckets: [Vec<DdlStatement>; 41] = [
+        let buckets: [Vec<DdlStatement>; 44] = [
             self.create_schemas,
             self.create_enums,
             self.enum_set_schema,
@@ -107,6 +113,7 @@ impl Plan {
             self.alter_roles,
             self.disable_rls,
             self.drop_policies,
+            self.drop_ind_policies,
             self.drop_foreign_keys,
             self.drop_indexes,
             self.drop_checks,
@@ -128,18 +135,23 @@ impl Plan {
             self.raw_sql,
             self.enable_rls,
             self.create_policies,
+            self.create_ind_policies,
             self.alter_policies,
+            self.alter_ind_policies,
             self.rename_policies,
-            self.create_views,
+            self.rename_ind_policies,
         ];
         let mut out: Vec<DdlStatement> = Vec::new();
         for b in buckets {
             out.extend(b);
         }
-        // drop_views / rename_views / drop_enums fold in after create_views, and
-        // drop_schemas comes dead last (after every object in them is gone).
+        // views: DROP before CREATE (a definition change = DROP then CREATE),
+        // then RENAME, SET SCHEMA, and in-place option/tablespace/using alters.
         out.extend(self.drop_views);
+        out.extend(self.create_views);
         out.extend(self.rename_views);
+        out.extend(self.view_set_schema);
+        out.extend(self.alter_views);
         out.extend(self.drop_enums);
         out.extend(self.drop_schemas);
         out

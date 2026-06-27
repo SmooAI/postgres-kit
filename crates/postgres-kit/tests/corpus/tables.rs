@@ -578,5 +578,319 @@ pub fn cases() -> Vec<DiffCase> {
                 "multi-table create: FKs/indexes emitted after all tables; FK ordering is declaration-order vs BTreeMap-sorted — defer to differ promotion",
             ),
         },
+        // ---- alter foreign key: add ON DELETE cascade ----
+        // Postgres has no in-place FK alter, so a changed referential action is a
+        // drop+recreate, emitted as drizzle's single `alter_reference` statement.
+        DiffCase {
+            name: "alter foreign key add on delete cascade",
+            from: fk_pair(SnapForeignKey::new(
+                "posts_owner_id_users_id_fk",
+                ["owner_id"],
+                "public.users",
+                ["id"],
+            )),
+            to: fk_pair(
+                SnapForeignKey::new(
+                    "posts_owner_id_users_id_fk",
+                    ["owner_id"],
+                    "public.users",
+                    ["id"],
+                )
+                .on_delete("cascade"),
+            ),
+            renames: &[],
+            expected_sql: &[
+                "ALTER TABLE \"posts\" DROP CONSTRAINT \"posts_owner_id_users_id_fk\";\nALTER TABLE \"posts\" ADD CONSTRAINT \"posts_owner_id_users_id_fk\" FOREIGN KEY (\"owner_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+            ],
+            status: Status::Supported,
+        },
+        // ---- alter foreign key: add ON UPDATE cascade ----
+        DiffCase {
+            name: "alter foreign key add on update cascade",
+            from: fk_pair(SnapForeignKey::new(
+                "posts_owner_id_users_id_fk",
+                ["owner_id"],
+                "public.users",
+                ["id"],
+            )),
+            to: fk_pair(
+                SnapForeignKey::new(
+                    "posts_owner_id_users_id_fk",
+                    ["owner_id"],
+                    "public.users",
+                    ["id"],
+                )
+                .on_update("cascade"),
+            ),
+            renames: &[],
+            expected_sql: &[
+                "ALTER TABLE \"posts\" DROP CONSTRAINT \"posts_owner_id_users_id_fk\";\nALTER TABLE \"posts\" ADD CONSTRAINT \"posts_owner_id_users_id_fk\" FOREIGN KEY (\"owner_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE no action ON UPDATE cascade;",
+            ],
+            status: Status::Supported,
+        },
+        // ---- alter foreign key: change ON DELETE action (cascade -> set null) ----
+        DiffCase {
+            name: "alter foreign key change on delete action",
+            from: fk_pair(
+                SnapForeignKey::new(
+                    "posts_owner_id_users_id_fk",
+                    ["owner_id"],
+                    "public.users",
+                    ["id"],
+                )
+                .on_delete("cascade"),
+            ),
+            to: fk_pair(
+                SnapForeignKey::new(
+                    "posts_owner_id_users_id_fk",
+                    ["owner_id"],
+                    "public.users",
+                    ["id"],
+                )
+                .on_delete("set null"),
+            ),
+            renames: &[],
+            expected_sql: &[
+                "ALTER TABLE \"posts\" DROP CONSTRAINT \"posts_owner_id_users_id_fk\";\nALTER TABLE \"posts\" ADD CONSTRAINT \"posts_owner_id_users_id_fk\" FOREIGN KEY (\"owner_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE set null ON UPDATE no action;",
+            ],
+            status: Status::Supported,
+        },
+        // ---- alter foreign key: remove ON DELETE action (cascade -> default) ----
+        DiffCase {
+            name: "alter foreign key remove on delete action",
+            from: fk_pair(
+                SnapForeignKey::new(
+                    "posts_owner_id_users_id_fk",
+                    ["owner_id"],
+                    "public.users",
+                    ["id"],
+                )
+                .on_delete("cascade"),
+            ),
+            to: fk_pair(SnapForeignKey::new(
+                "posts_owner_id_users_id_fk",
+                ["owner_id"],
+                "public.users",
+                ["id"],
+            )),
+            renames: &[],
+            expected_sql: &[
+                "ALTER TABLE \"posts\" DROP CONSTRAINT \"posts_owner_id_users_id_fk\";\nALTER TABLE \"posts\" ADD CONSTRAINT \"posts_owner_id_users_id_fk\" FOREIGN KEY (\"owner_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE no action ON UPDATE no action;",
+            ],
+            status: Status::Supported,
+        },
+        // ---- alter foreign key: add both ON DELETE and ON UPDATE ----
+        DiffCase {
+            name: "alter foreign key add on delete and on update",
+            from: fk_pair(SnapForeignKey::new(
+                "posts_owner_id_users_id_fk",
+                ["owner_id"],
+                "public.users",
+                ["id"],
+            )),
+            to: fk_pair(
+                SnapForeignKey::new(
+                    "posts_owner_id_users_id_fk",
+                    ["owner_id"],
+                    "public.users",
+                    ["id"],
+                )
+                .on_delete("cascade")
+                .on_update("cascade"),
+            ),
+            renames: &[],
+            expected_sql: &[
+                "ALTER TABLE \"posts\" DROP CONSTRAINT \"posts_owner_id_users_id_fk\";\nALTER TABLE \"posts\" ADD CONSTRAINT \"posts_owner_id_users_id_fk\" FOREIGN KEY (\"owner_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE cascade;",
+            ],
+            status: Status::Supported,
+        },
+        // ---- alter index: add WHERE predicate (drop + recreate) ----
+        DiffCase {
+            name: "alter index add where predicate",
+            from: SchemaSnapshot::builder()
+                .table(
+                    SnapTable::new("users")
+                        .col(SnapColumn::new("id", "integer").not_null())
+                        .index(SnapIndex::new(
+                            "users_id_index",
+                            [SnapIndexColumn::column("id")],
+                        )),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .table(
+                    SnapTable::new("users")
+                        .col(SnapColumn::new("id", "integer").not_null())
+                        .index(
+                            SnapIndex::new("users_id_index", [SnapIndexColumn::column("id")])
+                                .where_clause("\"id\" > 0"),
+                        ),
+                )
+                .build(),
+            renames: &[],
+            expected_sql: &[
+                "DROP INDEX \"users_id_index\";",
+                "CREATE INDEX \"users_id_index\" ON \"users\" USING btree (\"id\") WHERE \"id\" > 0;",
+            ],
+            status: Status::Supported,
+        },
+        // ---- alter index: change access method (btree -> hash) ----
+        DiffCase {
+            name: "alter index change method",
+            from: SchemaSnapshot::builder()
+                .table(
+                    SnapTable::new("users")
+                        .col(SnapColumn::new("id", "integer").not_null())
+                        .index(SnapIndex::new(
+                            "users_id_index",
+                            [SnapIndexColumn::column("id")],
+                        )),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .table(
+                    SnapTable::new("users")
+                        .col(SnapColumn::new("id", "integer").not_null())
+                        .index(
+                            SnapIndex::new("users_id_index", [SnapIndexColumn::column("id")])
+                                .method("hash"),
+                        ),
+                )
+                .build(),
+            renames: &[],
+            expected_sql: &[
+                "DROP INDEX \"users_id_index\";",
+                "CREATE INDEX \"users_id_index\" ON \"users\" USING hash (\"id\");",
+            ],
+            status: Status::Supported,
+        },
+        // ---- alter index: add a per-column opclass ----
+        DiffCase {
+            name: "alter index add opclass",
+            from: SchemaSnapshot::builder()
+                .table(
+                    SnapTable::new("users")
+                        .col(SnapColumn::new("name", "text").not_null())
+                        .index(
+                            SnapIndex::new("users_name_index", [SnapIndexColumn::column("name")])
+                                .method("gin"),
+                        ),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .table(
+                    SnapTable::new("users")
+                        .col(SnapColumn::new("name", "text").not_null())
+                        .index(
+                            SnapIndex::new(
+                                "users_name_index",
+                                [SnapIndexColumn::column("name").opclass("gin_trgm_ops")],
+                            )
+                            .method("gin"),
+                        ),
+                )
+                .build(),
+            renames: &[],
+            expected_sql: &[
+                "DROP INDEX \"users_name_index\";",
+                "CREATE INDEX \"users_name_index\" ON \"users\" USING gin (\"name\" gin_trgm_ops);",
+            ],
+            status: Status::Supported,
+        },
+        // ---- alter index: change the indexed columns ----
+        DiffCase {
+            name: "alter index change columns",
+            from: SchemaSnapshot::builder()
+                .table(
+                    SnapTable::new("users")
+                        .col(SnapColumn::new("id", "integer").not_null())
+                        .col(SnapColumn::new("email", "text").not_null())
+                        .index(SnapIndex::new("users_idx", [SnapIndexColumn::column("id")])),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .table(
+                    SnapTable::new("users")
+                        .col(SnapColumn::new("id", "integer").not_null())
+                        .col(SnapColumn::new("email", "text").not_null())
+                        .index(SnapIndex::new("users_idx", [SnapIndexColumn::column("email")])),
+                )
+                .build(),
+            renames: &[],
+            expected_sql: &[
+                "DROP INDEX \"users_idx\";",
+                "CREATE INDEX \"users_idx\" ON \"users\" USING btree (\"email\");",
+            ],
+            status: Status::Supported,
+        },
+        // ---- alter index: non-unique -> unique ----
+        DiffCase {
+            name: "alter index set unique",
+            from: SchemaSnapshot::builder()
+                .table(
+                    SnapTable::new("users")
+                        .col(SnapColumn::new("email", "text").not_null())
+                        .index(SnapIndex::new(
+                            "users_email_index",
+                            [SnapIndexColumn::column("email")],
+                        )),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .table(
+                    SnapTable::new("users")
+                        .col(SnapColumn::new("email", "text").not_null())
+                        .index(
+                            SnapIndex::new(
+                                "users_email_index",
+                                [SnapIndexColumn::column("email")],
+                            )
+                            .unique(),
+                        ),
+                )
+                .build(),
+            renames: &[],
+            expected_sql: &[
+                "DROP INDEX \"users_email_index\";",
+                "CREATE UNIQUE INDEX \"users_email_index\" ON \"users\" USING btree (\"email\");",
+            ],
+            status: Status::Supported,
+        },
+        // ---- drop index (no recreate) — keeps the plain-drop path working ----
+        DiffCase {
+            name: "drop index",
+            from: SchemaSnapshot::builder()
+                .table(
+                    SnapTable::new("users")
+                        .col(SnapColumn::new("id", "integer").not_null())
+                        .index(SnapIndex::new(
+                            "users_id_index",
+                            [SnapIndexColumn::column("id")],
+                        )),
+                )
+                .build(),
+            to: SchemaSnapshot::builder()
+                .table(SnapTable::new("users").col(SnapColumn::new("id", "integer").not_null()))
+                .build(),
+            renames: &[],
+            expected_sql: &["DROP INDEX \"users_id_index\";"],
+            status: Status::Supported,
+        },
     ]
+}
+
+/// A `users(id)` parent plus a `posts(id, owner_id)` child carrying the given FK.
+/// Both tables are otherwise identical across a from/to pair, so diffing two
+/// `fk_pair`s with different FK definitions isolates the foreign-key change (no
+/// table/column DDL is emitted).
+fn fk_pair(fk: SnapForeignKey) -> SchemaSnapshot {
+    SchemaSnapshot::builder()
+        .table(SnapTable::new("users").col(SnapColumn::new("id", "uuid").primary_key()))
+        .table(
+            SnapTable::new("posts")
+                .col(SnapColumn::new("id", "uuid").primary_key())
+                .col(SnapColumn::new("owner_id", "uuid"))
+                .foreign_key(fk),
+        )
+        .build()
 }

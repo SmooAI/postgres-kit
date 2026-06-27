@@ -208,6 +208,13 @@ fn recreate(plan: &mut Plan, to: &SchemaSnapshot, to_e: &SnapEnum) {
 }
 
 /// Scan every table for columns whose (possibly array) type references `enum_name`.
+///
+/// Drizzle cascades over dependent columns in schema-declaration order, which puts
+/// the `public`-schema tables ahead of objects in named schemas. `to.tables` is a
+/// [`BTreeMap`] keyed by `schema.name`, which would otherwise float a `new_schema`
+/// table ahead of `public` (`'n' < 'p'`); a final stable sort restores the
+/// `public`-first grouping while keeping each table's own columns in `position`
+/// order.
 fn collect_dep_columns(to: &SchemaSnapshot, enum_name: &str) -> Vec<DepColumn> {
     let mut deps: Vec<DepColumn> = Vec::new();
     for table in to.tables.values() {
@@ -226,6 +233,13 @@ fn collect_dep_columns(to: &SchemaSnapshot, enum_name: &str) -> Vec<DepColumn> {
             }
         }
     }
+    deps.sort_by(|a, b| {
+        (a.table_schema != "public", &a.table_schema, &a.table_name).cmp(&(
+            b.table_schema != "public",
+            &b.table_schema,
+            &b.table_name,
+        ))
+    });
     deps
 }
 

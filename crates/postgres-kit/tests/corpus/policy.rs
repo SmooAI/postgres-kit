@@ -15,12 +15,14 @@
 //! - `pgRole('manager').existing()` is referenced by name only (`"manager"`); an
 //!   `.existing()` role is never `CREATE`d, so it is not added to the snapshot.
 //!
-//! Skipped cases: drizzle's `.link(<table not in the schema object>)` produces
-//! *individual* policies (`create_ind_policy` / `drop_ind_policy` /
-//! `alter_ind_policy` / `rename_ind_policy`) whose SQL targets a fully-qualified
-//! `"schema"."table"` that is otherwise absent from the schema. The snapshot IR
-//! is table-scoped (every policy lives inside a `SnapTable`), so those are not
-//! representable yet.
+//! Independent (schema-level) policies: drizzle's `.link(<table not in the schema
+//! object>)` produces *individual* policies (`create_ind_policy` /
+//! `drop_ind_policy` / `alter_ind_policy` / `rename_ind_policy`) whose SQL targets
+//! a fully-qualified `"schema"."table"` that is otherwise absent from the schema.
+//! These live in [`SchemaSnapshot::ind_policies`] (built via `.ind_policy(...)`),
+//! not inside a `SnapTable`, and render with an explicit schema (even `public`).
+//!
+//! Still skipped: the `BTreeMap` insertion-order case noted inline.
 
 use postgres_kit::differ::ir::*;
 use postgres_kit::{PolicyAs, PolicyFor};
@@ -40,6 +42,13 @@ fn snap(table: SnapTable) -> SchemaSnapshot {
 /// An empty schema.
 fn empty() -> SchemaSnapshot {
     SchemaSnapshot::builder().build()
+}
+
+/// Wrap a single independent (schema-level) policy on an absent `schema.table`.
+fn snap_ind(schema: &str, table: &str, policy: SnapPolicy) -> SchemaSnapshot {
+    SchemaSnapshot::builder()
+        .ind_policy(SnapIndPolicy::new(schema, table, policy))
+        .build()
 }
 
 pub fn cases() -> Vec<DiffCase> {
@@ -490,115 +499,173 @@ pub fn cases() -> Vec<DiffCase> {
                 "multi-policy creation emits in insertion order (test1, test); BTreeMap iterates name-sorted (test, test1)",
             ),
         },
-        // ---- linked policies on a NON-schema table (ind_policy) — not representable ----
+        // ---- linked policies on a NON-schema table (ind_policy) ----
         DiffCase {
             name: "link non-schema table",
             from: empty(),
-            to: empty(),
+            to: snap_ind(
+                "public",
+                "users",
+                SnapPolicy::new("test").as_permissiveness(PolicyAs::Permissive),
+            ),
             renames: &[],
             expected_sql: &["CREATE POLICY \"test\" ON \"public\".\"users\" AS PERMISSIVE FOR ALL TO public;"],
-            status: Status::Skip(
-                "create_ind_policy: policy linked to a table absent from the schema; snapshot policies are table-scoped",
-            ),
+            status: Status::Supported,
         },
         DiffCase {
             name: "unlink non-schema table",
-            from: empty(),
+            from: snap_ind(
+                "public",
+                "users",
+                SnapPolicy::new("test").as_permissiveness(PolicyAs::Permissive),
+            ),
             to: empty(),
             renames: &[],
             expected_sql: &["DROP POLICY \"test\" ON \"public\".\"users\" CASCADE;"],
-            status: Status::Skip(
-                "drop_ind_policy: policy linked to a table absent from the schema; snapshot policies are table-scoped",
-            ),
+            status: Status::Supported,
         },
         DiffCase {
             name: "add policy + link non-schema table",
             from: snap(tbl("users")),
-            to: snap(
-                tbl("users")
-                    .policy(SnapPolicy::new("test2").as_permissiveness(PolicyAs::Permissive))
-                    .enable_rls(),
-            ),
+            to: SchemaSnapshot::builder()
+                .table(
+                    tbl("users")
+                        .policy(SnapPolicy::new("test2").as_permissiveness(PolicyAs::Permissive))
+                        .enable_rls(),
+                )
+                .ind_policy(SnapIndPolicy::new(
+                    "public",
+                    "cities",
+                    SnapPolicy::new("test").as_permissiveness(PolicyAs::Permissive),
+                ))
+                .build(),
             renames: &[],
             expected_sql: &[
                 "ALTER TABLE \"users\" ENABLE ROW LEVEL SECURITY;",
                 "CREATE POLICY \"test2\" ON \"users\" AS PERMISSIVE FOR ALL TO public;",
                 "CREATE POLICY \"test\" ON \"public\".\"cities\" AS PERMISSIVE FOR ALL TO public;",
             ],
-            status: Status::Skip(
-                "mixes a table policy with a create_ind_policy on a non-schema table (cities)",
-            ),
+            status: Status::Supported,
         },
         DiffCase {
             name: "add policy + link non-schema table from auth schema",
             from: snap(tbl("users")),
-            to: snap(
-                tbl("users")
-                    .policy(SnapPolicy::new("test2").as_permissiveness(PolicyAs::Permissive))
-                    .enable_rls(),
-            ),
+            to: SchemaSnapshot::builder()
+                .table(
+                    tbl("users")
+                        .policy(SnapPolicy::new("test2").as_permissiveness(PolicyAs::Permissive))
+                        .enable_rls(),
+                )
+                .ind_policy(SnapIndPolicy::new(
+                    "auth",
+                    "cities",
+                    SnapPolicy::new("test").as_permissiveness(PolicyAs::Permissive),
+                ))
+                .build(),
             renames: &[],
             expected_sql: &[
                 "ALTER TABLE \"users\" ENABLE ROW LEVEL SECURITY;",
                 "CREATE POLICY \"test2\" ON \"users\" AS PERMISSIVE FOR ALL TO public;",
                 "CREATE POLICY \"test\" ON \"auth\".\"cities\" AS PERMISSIVE FOR ALL TO public;",
             ],
-            status: Status::Skip(
-                "mixes a table policy with a create_ind_policy on a non-schema table (auth.cities)",
-            ),
+            status: Status::Supported,
         },
         DiffCase {
             name: "rename policy that is linked",
-            from: empty(),
-            to: empty(),
-            renames: &["\"public\".\"users\".test->\"public\".\"users\".newName"],
-            expected_sql: &["ALTER POLICY \"test\" ON \"public\".\"users\" RENAME TO \"newName\";"],
-            status: Status::Skip(
-                "rename_ind_policy: linked policy on a non-schema table; snapshot policies are table-scoped",
+            from: snap_ind(
+                "public",
+                "users",
+                SnapPolicy::new("test").as_permissiveness(PolicyAs::Permissive),
             ),
+            to: snap_ind(
+                "public",
+                "users",
+                SnapPolicy::new("newName").as_permissiveness(PolicyAs::Permissive),
+            ),
+            renames: &["ind_policy:public.users.test->public.users.newName"],
+            expected_sql: &["ALTER POLICY \"test\" ON \"public\".\"users\" RENAME TO \"newName\";"],
+            status: Status::Supported,
         },
         DiffCase {
             name: "alter policy that is linked: changing roles",
-            from: empty(),
-            to: empty(),
+            from: snap_ind(
+                "public",
+                "users",
+                SnapPolicy::new("test").as_permissiveness(PolicyAs::Permissive),
+            ),
+            to: snap_ind(
+                "public",
+                "users",
+                SnapPolicy::new("test")
+                    .as_permissiveness(PolicyAs::Permissive)
+                    .to_roles(["current_role"]),
+            ),
             renames: &[],
             expected_sql: &["ALTER POLICY \"test\" ON \"public\".\"users\" TO current_role;"],
-            status: Status::Skip(
-                "alter_ind_policy: linked policy on a non-schema table; snapshot policies are table-scoped",
-            ),
+            status: Status::Supported,
         },
         DiffCase {
             name: "alter policy that is linked: with check",
-            from: empty(),
-            to: empty(),
+            from: snap_ind(
+                "public",
+                "users",
+                SnapPolicy::new("test")
+                    .as_permissiveness(PolicyAs::Permissive)
+                    .with_check("true"),
+            ),
+            to: snap_ind(
+                "public",
+                "users",
+                SnapPolicy::new("test")
+                    .as_permissiveness(PolicyAs::Permissive)
+                    .with_check("false"),
+            ),
             renames: &[],
             expected_sql: &["ALTER POLICY \"test\" ON \"public\".\"users\" TO public WITH CHECK (false);"],
-            status: Status::Skip(
-                "alter_ind_policy: linked policy on a non-schema table; snapshot policies are table-scoped",
-            ),
+            status: Status::Supported,
         },
         DiffCase {
             name: "alter policy that is linked: using",
-            from: empty(),
-            to: empty(),
+            from: snap_ind(
+                "public",
+                "users",
+                SnapPolicy::new("test")
+                    .as_permissiveness(PolicyAs::Permissive)
+                    .using("true"),
+            ),
+            to: snap_ind(
+                "public",
+                "users",
+                SnapPolicy::new("test")
+                    .as_permissiveness(PolicyAs::Permissive)
+                    .using("false"),
+            ),
             renames: &[],
             expected_sql: &["ALTER POLICY \"test\" ON \"public\".\"users\" TO public USING (false);"],
-            status: Status::Skip(
-                "alter_ind_policy: linked policy on a non-schema table; snapshot policies are table-scoped",
-            ),
+            status: Status::Supported,
         },
         DiffCase {
             name: "alter policy that is linked: for recreation",
-            from: empty(),
-            to: empty(),
+            from: snap_ind(
+                "public",
+                "users",
+                SnapPolicy::new("test")
+                    .as_permissiveness(PolicyAs::Permissive)
+                    .for_command(PolicyFor::Insert),
+            ),
+            to: snap_ind(
+                "public",
+                "users",
+                SnapPolicy::new("test")
+                    .as_permissiveness(PolicyAs::Permissive)
+                    .for_command(PolicyFor::Delete),
+            ),
             renames: &[],
             expected_sql: &[
                 "DROP POLICY \"test\" ON \"public\".\"users\" CASCADE;",
                 "CREATE POLICY \"test\" ON \"public\".\"users\" AS PERMISSIVE FOR DELETE TO public;",
             ],
-            status: Status::Skip(
-                "drop/create_ind_policy: linked policy on a non-schema table; snapshot policies are table-scoped",
-            ),
+            status: Status::Supported,
         },
         // ---- alter policy declared in the table (array form) ----
         DiffCase {

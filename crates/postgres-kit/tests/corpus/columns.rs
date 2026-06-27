@@ -258,8 +258,12 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "ALTER TABLE \"ref1\" DROP CONSTRAINT \"ref1_id1_t1_id_fk\";\nALTER TABLE \"ref1\" ADD CONSTRAINT \"ref1_id1_t1_id_fk\" FOREIGN KEY (\"id1\") REFERENCES \"public\".\"t1\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+                "ALTER TABLE \"ref1\" DROP CONSTRAINT \"ref1_id2_t2_id_fk\";\nALTER TABLE \"ref1\" ADD CONSTRAINT \"ref1_id2_t2_id_fk\" FOREIGN KEY (\"id2\") REFERENCES \"public\".\"t2\"(\"id\") ON DELETE set null ON UPDATE no action;",
+                "ALTER TABLE \"ref1\" DROP CONSTRAINT \"ref1_id3_t3_id_fk\";\nALTER TABLE \"ref1\" ADD CONSTRAINT \"ref1_id3_t3_id_fk\" FOREIGN KEY (\"id3\") REFERENCES \"public\".\"t3\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+            ],
+            status: Status::Supported,
         },
         // ---- add multiple constraints #2 ----
         // Single referenced table t1 with three PK columns; three FKs gain onDelete.
@@ -300,8 +304,12 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "ALTER TABLE \"ref1\" DROP CONSTRAINT \"ref1_id1_t1_id1_fk\";\nALTER TABLE \"ref1\" ADD CONSTRAINT \"ref1_id1_t1_id1_fk\" FOREIGN KEY (\"id1\") REFERENCES \"public\".\"t1\"(\"id1\") ON DELETE cascade ON UPDATE no action;",
+                "ALTER TABLE \"ref1\" DROP CONSTRAINT \"ref1_id2_t1_id2_fk\";\nALTER TABLE \"ref1\" ADD CONSTRAINT \"ref1_id2_t1_id2_fk\" FOREIGN KEY (\"id2\") REFERENCES \"public\".\"t1\"(\"id2\") ON DELETE set null ON UPDATE no action;",
+                "ALTER TABLE \"ref1\" DROP CONSTRAINT \"ref1_id3_t1_id3_fk\";\nALTER TABLE \"ref1\" ADD CONSTRAINT \"ref1_id3_t1_id3_fk\" FOREIGN KEY (\"id3\") REFERENCES \"public\".\"t1\"(\"id3\") ON DELETE cascade ON UPDATE no action;",
+            ],
+            status: Status::Supported,
         },
         // ---- add multiple constraints #3 ----
         // Three referencing tables (ref1/ref2/ref3) each gain an onDelete action.
@@ -354,8 +362,12 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "ALTER TABLE \"ref1\" DROP CONSTRAINT \"ref1_id_t1_id1_fk\";\nALTER TABLE \"ref1\" ADD CONSTRAINT \"ref1_id_t1_id1_fk\" FOREIGN KEY (\"id\") REFERENCES \"public\".\"t1\"(\"id1\") ON DELETE cascade ON UPDATE no action;",
+                "ALTER TABLE \"ref2\" DROP CONSTRAINT \"ref2_id_t1_id2_fk\";\nALTER TABLE \"ref2\" ADD CONSTRAINT \"ref2_id_t1_id2_fk\" FOREIGN KEY (\"id\") REFERENCES \"public\".\"t1\"(\"id2\") ON DELETE set null ON UPDATE no action;",
+                "ALTER TABLE \"ref3\" DROP CONSTRAINT \"ref3_id_t1_id3_fk\";\nALTER TABLE \"ref3\" ADD CONSTRAINT \"ref3_id_t1_id3_fk\" FOREIGN KEY (\"id\") REFERENCES \"public\".\"t1\"(\"id3\") ON DELETE cascade ON UPDATE no action;",
+            ],
+            status: Status::Supported,
         },
         // ---- varchar and text default values escape single quotes ----
         // schema1: table { id serial primaryKey }

@@ -357,6 +357,57 @@ pub enum DdlStatement {
         to: String,
         materialized: bool,
     },
+    AlterViewSetSchema {
+        from_schema: String,
+        name: String,
+        to_schema: String,
+        materialized: bool,
+    },
+    AlterViewSetOptions {
+        schema: String,
+        name: String,
+        materialized: bool,
+        options: Vec<(String, String)>,
+    },
+    AlterViewResetOptions {
+        schema: String,
+        name: String,
+        materialized: bool,
+        keys: Vec<String>,
+    },
+    AlterViewSetTablespace {
+        schema: String,
+        name: String,
+        tablespace: String,
+    },
+    AlterViewSetAccessMethod {
+        schema: String,
+        name: String,
+        using: String,
+    },
+
+    // ---- independent (schema-level) policies; target relation ALWAYS schema-qualified ----
+    CreateIndPolicy {
+        schema: String,
+        table: String,
+        policy: SnapPolicy,
+    },
+    DropIndPolicy {
+        schema: String,
+        table: String,
+        name: String,
+    },
+    AlterIndPolicy {
+        schema: String,
+        table: String,
+        policy: SnapPolicy,
+    },
+    RenameIndPolicy {
+        schema: String,
+        table: String,
+        from: String,
+        to: String,
+    },
 
     // ---- sequences ----
     CreateSequence(SnapSequence),
@@ -722,7 +773,12 @@ impl DdlStatement {
                 index,
             } => render_create_index(schema, table, index),
             DdlStatement::DropIndex { schema, name } => {
-                format!("DROP INDEX {};", qualify(&format!("{schema}.{name}")))
+                let target = if schema.is_empty() || schema == "public" {
+                    quote_identifier(name)
+                } else {
+                    format!("{}.{}", quote_identifier(schema), quote_identifier(name))
+                };
+                format!("DROP INDEX {target};")
             }
             DdlStatement::AlterIndex {
                 schema,
@@ -793,6 +849,93 @@ impl DdlStatement {
                 "ALTER {}VIEW {} RENAME TO {};",
                 if *materialized { "MATERIALIZED " } else { "" },
                 qualify(&format!("{schema}.{from}")),
+                quote_identifier(to)
+            ),
+            DdlStatement::AlterViewSetSchema {
+                from_schema,
+                name,
+                to_schema,
+                materialized,
+            } => format!(
+                "ALTER {}VIEW {} SET SCHEMA {};",
+                if *materialized { "MATERIALIZED " } else { "" },
+                qualify(&format!("{from_schema}.{name}")),
+                quote_identifier(to_schema)
+            ),
+            DdlStatement::AlterViewSetOptions {
+                schema,
+                name,
+                materialized,
+                options,
+            } => {
+                let opts = options
+                    .iter()
+                    .map(|(k, v)| format!("{k} = {v}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "ALTER {}VIEW {} SET ({opts});",
+                    if *materialized { "MATERIALIZED " } else { "" },
+                    qualify(&format!("{schema}.{name}"))
+                )
+            }
+            DdlStatement::AlterViewResetOptions {
+                schema,
+                name,
+                materialized,
+                keys,
+            } => format!(
+                "ALTER {}VIEW {} RESET ({});",
+                if *materialized { "MATERIALIZED " } else { "" },
+                qualify(&format!("{schema}.{name}")),
+                keys.join(", ")
+            ),
+            DdlStatement::AlterViewSetTablespace {
+                schema,
+                name,
+                tablespace,
+            } => format!(
+                "ALTER MATERIALIZED VIEW {} SET TABLESPACE {tablespace};",
+                qualify(&format!("{schema}.{name}"))
+            ),
+            DdlStatement::AlterViewSetAccessMethod {
+                schema,
+                name,
+                using,
+            } => format!(
+                "ALTER MATERIALIZED VIEW {} SET ACCESS METHOD {};",
+                qualify(&format!("{schema}.{name}")),
+                quote_identifier(using)
+            ),
+
+            DdlStatement::CreateIndPolicy {
+                schema,
+                table,
+                policy,
+            } => render_create_policy_qualified(schema, table, policy),
+            DdlStatement::DropIndPolicy {
+                schema,
+                table,
+                name,
+            } => format!(
+                "DROP POLICY {} ON {} CASCADE;",
+                quote_identifier(name),
+                qualify(&format!("{schema}.{table}"))
+            ),
+            DdlStatement::AlterIndPolicy {
+                schema,
+                table,
+                policy,
+            } => render_alter_policy_qualified(schema, table, policy),
+            DdlStatement::RenameIndPolicy {
+                schema,
+                table,
+                from,
+                to,
+            } => format!(
+                "ALTER POLICY {} ON {} RENAME TO {};",
+                quote_identifier(from),
+                qualify(&format!("{schema}.{table}")),
                 quote_identifier(to)
             ),
 
@@ -866,11 +1009,18 @@ pub fn render_column_def(table: &str, col: &SnapColumn) -> String {
 /// Render the ` GENERATED <kind> AS IDENTITY (sequence name ... )` clause, filling
 /// the Postgres `integer` identity defaults drizzle bakes in.
 fn render_identity_inline(table: &str, column: &str, id: &SnapIdentity) -> String {
-    let seq_name = format!("{table}_{column}_seq");
+    let seq_name = id
+        .name
+        .clone()
+        .unwrap_or_else(|| format!("{table}_{column}_seq"));
     let inc = id.increment.as_deref().unwrap_or("1");
     let min = id.min_value.as_deref().unwrap_or("1");
     let max = id.max_value.as_deref().unwrap_or("2147483647");
-    let start = id.start_with.as_deref().unwrap_or("1");
+    let start = id
+        .start_with
+        .as_deref()
+        .or(id.min_value.as_deref())
+        .unwrap_or("1");
     let cache = id.cache.as_deref().unwrap_or("1");
     let mut s = format!(
         " GENERATED {} AS IDENTITY (sequence name {} INCREMENT BY {inc} MINVALUE {min} MAXVALUE {max} START WITH {start} CACHE {cache}",
@@ -1029,11 +1179,68 @@ fn render_alter_policy(schema: &str, table: &str, policy: &SnapPolicy) -> String
 
 fn render_create_view(v: &SnapView) -> String {
     let definition = v.definition.clone().unwrap_or_default();
-    format!(
-        "CREATE {}VIEW {} AS ({definition});",
+    let mut s = format!(
+        "CREATE {}VIEW {}",
         if v.materialized { "MATERIALIZED " } else { "" },
         qualify(&v.key())
-    )
+    );
+    if let Some(u) = &v.using {
+        s.push_str(&format!(" USING {}", quote_identifier(u)));
+    }
+    if !v.with_options.is_empty() {
+        let opts = v
+            .with_options
+            .iter()
+            .map(|(k, val)| format!("{k} = {val}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        s.push_str(&format!(" WITH ({opts})"));
+    }
+    if let Some(t) = &v.tablespace {
+        s.push_str(&format!(" TABLESPACE {t}"));
+    }
+    s.push_str(&format!(" AS ({definition})"));
+    if v.with_no_data {
+        s.push_str(" WITH NO DATA");
+    }
+    s.push(';');
+    s
+}
+
+fn render_create_policy_qualified(schema: &str, table: &str, policy: &SnapPolicy) -> String {
+    let as_ = policy.as_.map(|a| a.to_sql()).unwrap_or("PERMISSIVE");
+    let for_ = policy.for_.map(|f| f.to_sql()).unwrap_or("ALL");
+    let mut sql = format!(
+        "CREATE POLICY {} ON {} AS {as_} FOR {for_} TO {}",
+        quote_identifier(&policy.name),
+        qualify(&format!("{schema}.{table}")),
+        render_roles(&policy.to)
+    );
+    if let Some(u) = &policy.using {
+        sql.push_str(&format!(" USING ({u})"));
+    }
+    if let Some(w) = &policy.with_check {
+        sql.push_str(&format!(" WITH CHECK ({w})"));
+    }
+    sql.push(';');
+    sql
+}
+
+fn render_alter_policy_qualified(schema: &str, table: &str, policy: &SnapPolicy) -> String {
+    let mut sql = format!(
+        "ALTER POLICY {} ON {} TO {}",
+        quote_identifier(&policy.name),
+        qualify(&format!("{schema}.{table}")),
+        render_roles(&policy.to)
+    );
+    if let Some(u) = &policy.using {
+        sql.push_str(&format!(" USING ({u})"));
+    }
+    if let Some(w) = &policy.with_check {
+        sql.push_str(&format!(" WITH CHECK ({w})"));
+    }
+    sql.push(';');
+    sql
 }
 
 fn render_sequence(verb: &str, s: &SnapSequence) -> String {

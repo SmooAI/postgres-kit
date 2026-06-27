@@ -93,6 +93,9 @@ pub struct SchemaSnapshot {
     pub sequences: BTreeMap<String, SnapSequence>,
     /// Roles keyed by bare name.
     pub roles: BTreeMap<String, SnapRole>,
+    /// Independent (schema-level) policies — those linked to a table that is
+    /// absent from the snapshot. Keyed by `schema.table.policyname`.
+    pub ind_policies: BTreeMap<String, SnapIndPolicy>,
 }
 
 impl SchemaSnapshot {
@@ -141,6 +144,11 @@ impl SchemaSnapshotBuilder {
 
     pub fn role(mut self, r: SnapRole) -> Self {
         self.snapshot.roles.insert(r.name.clone(), r);
+        self
+    }
+
+    pub fn ind_policy(mut self, p: SnapIndPolicy) -> Self {
+        self.snapshot.ind_policies.insert(p.key(), p);
         self
     }
 
@@ -237,6 +245,9 @@ impl SnapTable {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapIdentity {
     pub kind: IdentityKind,
+    /// Custom identity sequence name (drizzle's `{ name: 'custom_seq' }`). When
+    /// `None`, the renderer derives the Postgres-implicit `{table}_{column}_seq`.
+    pub name: Option<String>,
     pub increment: Option<String>,
     pub min_value: Option<String>,
     pub max_value: Option<String>,
@@ -257,6 +268,7 @@ impl SnapIdentity {
     fn with_kind(kind: IdentityKind) -> Self {
         Self {
             kind,
+            name: None,
             increment: None,
             min_value: None,
             max_value: None,
@@ -590,6 +602,31 @@ impl SnapPolicy {
     }
 }
 
+/// A normalized *independent* (schema-level) policy: its target table is not
+/// present in the snapshot as a `SnapTable`. The target relation is always
+/// rendered schema-qualified (`"schema"."table"`), even for `public`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapIndPolicy {
+    pub schema: String,
+    pub table: String,
+    pub policy: SnapPolicy,
+}
+
+impl SnapIndPolicy {
+    pub fn new(schema: impl Into<String>, table: impl Into<String>, policy: SnapPolicy) -> Self {
+        Self {
+            schema: schema.into(),
+            table: table.into(),
+            policy,
+        }
+    }
+
+    /// Map key: `schema.table.policyname`.
+    pub fn key(&self) -> String {
+        format!("{}.{}.{}", self.schema, self.table, self.policy.name)
+    }
+}
+
 /// A normalized enum type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapEnum {
@@ -623,6 +660,17 @@ pub struct SnapView {
     pub name: String,
     pub definition: Option<String>,
     pub materialized: bool,
+    /// drizzle `.existing()` — a reference to a DB view the kit does not manage.
+    pub existing: bool,
+    /// `WITH (...)` storage params: snake_cased key -> rendered value. BTreeMap so
+    /// rendering is alphabetical, matching drizzle's option order.
+    pub with_options: BTreeMap<String, String>,
+    /// `TABLESPACE` (materialized views only).
+    pub tablespace: Option<String>,
+    /// `USING <access method>` (materialized views only).
+    pub using: Option<String>,
+    /// `WITH NO DATA` (materialized views only).
+    pub with_no_data: bool,
 }
 
 impl SnapView {
@@ -633,6 +681,11 @@ impl SnapView {
             name,
             definition: Some(definition.into()),
             materialized: false,
+            existing: false,
+            with_options: BTreeMap::new(),
+            tablespace: None,
+            using: None,
+            with_no_data: false,
         }
     }
 
@@ -642,6 +695,42 @@ impl SnapView {
 
     pub fn materialized(mut self) -> Self {
         self.materialized = true;
+        self
+    }
+
+    /// A drizzle `.existing()` view: no managed definition, never emitted as DDL.
+    pub fn reference(qualified: impl AsRef<str>) -> Self {
+        let (schema, name) = split_qualified(qualified.as_ref());
+        Self {
+            schema,
+            name,
+            definition: None,
+            materialized: false,
+            existing: true,
+            with_options: BTreeMap::new(),
+            tablespace: None,
+            using: None,
+            with_no_data: false,
+        }
+    }
+
+    pub fn with_option(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.with_options.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn tablespace(mut self, name: impl Into<String>) -> Self {
+        self.tablespace = Some(name.into());
+        self
+    }
+
+    pub fn using(mut self, method: impl Into<String>) -> Self {
+        self.using = Some(method.into());
+        self
+    }
+
+    pub fn with_no_data(mut self) -> Self {
+        self.with_no_data = true;
         self
     }
 }

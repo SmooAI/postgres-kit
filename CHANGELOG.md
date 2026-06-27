@@ -49,9 +49,32 @@ follows [Keep a Changelog](https://keepachangelog.com/); the project adheres to
   rename detection vs. drop+add). Covers tables, columns, checks, enums, generated
   & identity columns, RLS policies, roles, sequences, and views.
 - **Differ conformance corpus** (`tests/differ_corpus.rs`, ported from Drizzle
-  Kit's permissively-licensed Postgres fixtures): 247 cases — 125 asserted
-  (snapshot-in → expected-DDL-out under normalized comparison), 122 tracked as
+  Kit's permissively-licensed Postgres fixtures): 258 cases — 198 asserted
+  (snapshot-in → expected-DDL-out under normalized comparison), 60 tracked as
   `Skip` for features outside the snapshot IR (see ROADMAP follow-ups).
+- **Deferred-corpus promotion** (phase 2): the previously-`Skip`'d differ
+  categories are now asserted end-to-end —
+    - **Views**: `WITH (...)` storage options, materialized-view `TABLESPACE`,
+      `USING` access method, `SET SCHEMA`, in-place option `SET`/`RESET`, the
+      drizzle `.existing()` reference flag (`SnapView::reference`), and
+      DROP-before-CREATE recreate ordering. New `DdlStatement` variants
+      `AlterViewSetSchema` / `AlterViewSetOptions` / `AlterViewResetOptions` /
+      `AlterViewSetTablespace` / `AlterViewSetAccessMethod`; new `SnapView` fields
+      (`existing`, `with_options`, `tablespace`, `using`, `with_no_data`).
+    - **Enum recreate cascade** + **sequences** (create / alter / rename /
+      `SET SCHEMA` / drop) + **identity** (custom sequence name via a new
+      `SnapIdentity.name`; ascending-sequence `START WITH` falls back to
+      `MINVALUE`).
+    - **FK alter**: a changed `ON DELETE`/`ON UPDATE` renders as a single
+      DROP-then-ADD `AlterForeignKey` statement (the "add multiple constraints"
+      cases).
+    - **Index alter / drop**: `DROP INDEX` omits the implicit `public` schema to
+      match drizzle's convertor.
+    - **Independent (schema-level) policies**: policies linked to a table absent
+      from the snapshot, always schema-qualified — new `SnapIndPolicy` IR +
+      `SchemaSnapshotBuilder::ind_policy`, `DdlStatement::{Create,Drop,Alter,Rename}IndPolicy`,
+      an `ind_policy:` rename-hint tag, and dedicated `Plan` buckets ordered
+      alongside their table-policy counterparts.
 - **Migrations** (`feature = "migrate"`): forward-only `run_migrations` over a
   `*.sql` directory with a `__pg_migrations` bookkeeping table (idempotent re-runs),
   `split_sql_statements` (drizzle `--> statement-breakpoint` aware), and
@@ -77,12 +100,16 @@ follows [Keep a Changelog](https://keepachangelog.com/); the project adheres to
 
 ### Follow-ups (tracked as corpus `Skip`s, deferred to later phases)
 
-- Cross-category differ promotion: enum value add/remove/reorder when dependent
-  table **columns** change type (the enum↔column data-type-change cases).
-- View / materialized-view `WITH` options, `TABLESPACE`, `USING` access method,
-  `SET SCHEMA`, and the drizzle `.existing()` flag (not modeled in the IR).
-- Policies linked to tables absent from the snapshot (drizzle's
-  `create_ind_policy` / `alter_ind_policy` on non-schema tables).
-- Custom identity sequence names (`SnapIdentity` has no name field).
-- FK/index emission ordering for multi-table creates (declaration order vs.
-  `BTreeMap`-sorted) and composite-PK DROP+ADD joined into one drizzle breakpoint.
+- **Columns category** (the bulk of the remaining `Skip`s): column add / default
+  add / data-type change cases — including every enum↔standard and enum↔enum
+  data-type-change variant — are deferred to a dedicated columns-promotion pass.
+- Multi-construct **ordering** mismatches vs. drizzle's insertion order:
+  FK/index emission for multi-table creates (declaration order vs.
+  `BTreeMap`-sorted), composite-PK DROP+ADD joined into one drizzle breakpoint,
+  and multi-policy creation order (BTreeMap name-sorted vs. insertion order).
+- **Tables/schema** "statements-only encoding" goldens (add/drop/move table,
+  multiproject schema) whose drizzle fixtures assert statements only, not
+  `sqlStatements`.
+- Enum **schema rename** (`ALTER SCHEMA`) — schemas are not modeled as renameable
+  IR entities.
+- Error-case fixtures (duplicate view / constraint names that drizzle rejects).

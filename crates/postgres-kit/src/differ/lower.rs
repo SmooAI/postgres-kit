@@ -169,6 +169,7 @@ fn lower_column(col: &crate::spec::ColumnSpec, is_pk: bool) -> SnapColumn {
     if let Some(id) = &col.identity {
         sc = sc.identity(SnapIdentity {
             kind: id.kind,
+            name: None,
             increment: id.sequence.increment.clone(),
             min_value: id.sequence.min_value.clone(),
             max_value: id.sequence.max_value.clone(),
@@ -196,6 +197,11 @@ fn lower_view(v: &ViewSpec) -> SnapView {
         name: v.name.clone(),
         definition: v.definition.clone(),
         materialized: false,
+        existing: false,
+        with_options: std::collections::BTreeMap::new(),
+        tablespace: None,
+        using: None,
+        with_no_data: false,
     };
     if v.materialized {
         sv = sv.materialized();
