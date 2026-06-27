@@ -30,7 +30,7 @@ pub mod differ;
 #[cfg(feature = "codegen")]
 pub mod codegen;
 
-/// Tenant-scoped typed query layer (scaffolding).
+/// Tenant-scoped typed query layer over `sqlx`.
 #[cfg(feature = "tenant")]
 pub mod tenant;
 
@@ -51,3 +51,5 @@ pub use spec::{
     PolicySpec, ReferentialAction, RoleSpec, SequenceOptions, SequenceSpec, UniqueConstraintSpec,
     ViewSpec,
 };
+#[cfg(feature = "tenant")]
+pub use tenant::{TenantError, TenantScopedTable};

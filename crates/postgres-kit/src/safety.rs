@@ -44,6 +44,10 @@ pub enum SchemaError {
     },
     #[error("duplicate column {name:?} in table {table:?}")]
     DuplicateColumn { table: String, name: String },
+    #[error("no columns to set for table {table:?}")]
+    EmptyColumnSet { table: String },
+    #[error("column {column:?} is reserved on table {table:?} and cannot be assigned here")]
+    ReservedColumn { table: String, column: String },
     #[error("primary key references unknown column {name:?} in table {table:?}")]
     UnknownPrimaryKeyColumn { table: String, name: String },
     #[error("invalid rename hint {hint:?}: {reason}")]
