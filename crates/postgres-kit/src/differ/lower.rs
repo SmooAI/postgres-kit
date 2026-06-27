@@ -7,15 +7,21 @@ use crate::spec::{EnumTypeSpec, PgTableSpec, RoleSpec, SequenceSpec, ViewSpec};
 
 /// Lower a set of [`PgTableSpec`]s into a [`SchemaSnapshot`] (tables only).
 /// Top-level enums/views/sequences/roles are empty; use [`lower`] to include them.
+/// Every non-`public` schema referenced by a table is collected into
+/// [`SchemaSnapshot::schemas`] so the differ can emit `CREATE SCHEMA`.
 pub fn lower_tables(tables: &[PgTableSpec]) -> SchemaSnapshot {
     let mut builder = SchemaSnapshot::builder();
     for table in tables {
+        builder = builder.schema(table.schema.clone());
         builder = builder.table(lower_table(table));
     }
     builder.build()
 }
 
 /// Lower a full schema — tables plus top-level enums, views, sequences, roles.
+/// Every distinct non-`public` schema referenced by a table, enum, view, or
+/// sequence is collected into [`SchemaSnapshot::schemas`] so the differ emits a
+/// `CREATE SCHEMA` for it first. (Roles are cluster-global, not schema-scoped.)
 pub fn lower(
     tables: &[PgTableSpec],
     enums: &[EnumTypeSpec],
@@ -25,15 +31,19 @@ pub fn lower(
 ) -> SchemaSnapshot {
     let mut builder = SchemaSnapshot::builder();
     for table in tables {
+        builder = builder.schema(table.schema.clone());
         builder = builder.table(lower_table(table));
     }
     for e in enums {
+        builder = builder.schema(e.schema.clone());
         builder = builder.enum_type(lower_enum(e));
     }
     for v in views {
+        builder = builder.schema(v.schema.clone());
         builder = builder.view(lower_view(v));
     }
     for s in sequences {
+        builder = builder.schema(s.schema.clone());
         builder = builder.sequence(lower_sequence(s));
     }
     for r in roles {
@@ -254,6 +264,32 @@ mod tests {
             snap.foreign_keys.get("fk").unwrap().on_delete.as_deref(),
             Some("CASCADE")
         );
+    }
+
+    #[test]
+    fn lower_collects_non_public_schemas() {
+        let snap = lower(
+            &[
+                PgTableSpec::new("stores", vec![ColumnSpec::new("id", PgType::Uuid)])
+                    .in_schema("rpm_pizza"),
+                PgTableSpec::new("widgets", vec![ColumnSpec::new("id", PgType::Uuid)]),
+            ],
+            &[EnumTypeSpec::new("task_category", ["a", "b"]).in_schema("rpm_pizza")],
+            &[],
+            &[],
+            &[],
+        );
+        // Only the non-public schema is collected; public stays implicit.
+        assert_eq!(snap.schemas.len(), 1);
+        assert!(snap.schemas.contains("rpm_pizza"));
+
+        // lower_tables collects table schemas too.
+        let snap2 =
+            lower_tables(&[
+                PgTableSpec::new("t", vec![ColumnSpec::new("id", PgType::Uuid)])
+                    .in_schema("rpm_pizza"),
+            ]);
+        assert!(snap2.schemas.contains("rpm_pizza"));
     }
 
     #[test]

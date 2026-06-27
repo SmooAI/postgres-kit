@@ -4,14 +4,17 @@
 
 use std::collections::BTreeSet;
 
-use crate::safety::{quote_identifier, validate_identifier, SchemaError, SchemaLimits};
+use crate::safety::{
+    qualify_relation, quote_identifier, validate_identifier, SchemaError, SchemaLimits,
+};
 use crate::spec::{
     ColumnSpec, EnumTypeSpec, ForeignKeySpec, IdentitySpec, IndexSpec, PgTableSpec, PolicySpec,
     UniqueConstraintSpec,
 };
 
 /// Validate and quote a possibly schema-qualified name (`schema.table`), quoting
-/// each segment.
+/// each segment. Used for foreign-key *targets*, which are always rendered
+/// fully qualified (drizzle + the differ both qualify FK targets, even `public`).
 fn quote_qualified(
     name: &str,
     kind: &'static str,
@@ -23,6 +26,20 @@ fn quote_qualified(
         parts.push(quote_identifier(segment));
     }
     Ok(parts.join("."))
+}
+
+/// Validate `schema` + `name`, then render the relation with the kit-wide
+/// convention ([`qualify_relation`]): `public` implicit (bare), every other
+/// schema explicit (`"schema"."name"`).
+fn qualify_relation_validated(
+    schema: &str,
+    name: &str,
+    kind: &'static str,
+    limits: &SchemaLimits,
+) -> Result<String, SchemaError> {
+    validate_identifier(schema, "schema", limits)?;
+    validate_identifier(name, kind, limits)?;
+    Ok(qualify_relation(schema, name))
 }
 
 fn quote_cols(cols: &[String]) -> String {
@@ -134,7 +151,7 @@ pub fn to_create_table_sql(
     table: &PgTableSpec,
     limits: &SchemaLimits,
 ) -> Result<String, SchemaError> {
-    validate_identifier(&table.name, "table", limits)?;
+    let qualified_table = qualify_relation_validated(&table.schema, &table.name, "table", limits)?;
 
     if table.columns.is_empty() {
         return Err(SchemaError::NoColumns {
@@ -197,15 +214,13 @@ pub fn to_create_table_sql(
 
     Ok(format!(
         "CREATE TABLE IF NOT EXISTS {} (\n    {}\n);",
-        quote_identifier(&table.name),
+        qualified_table,
         clauses.join(",\n    ")
     ))
 }
 
 /// Render `CREATE TYPE <name> AS ENUM (...)` for an enum-type declaration.
 pub fn create_type_sql(e: &EnumTypeSpec, limits: &SchemaLimits) -> Result<String, SchemaError> {
-    validate_identifier(&e.schema, "schema", limits)?;
-    validate_identifier(&e.name, "type", limits)?;
     let values = e
         .values
         .iter()
@@ -214,7 +229,7 @@ pub fn create_type_sql(e: &EnumTypeSpec, limits: &SchemaLimits) -> Result<String
         .join(", ");
     Ok(format!(
         "CREATE TYPE {} AS ENUM ({});",
-        quote_qualified(&e.qualified_name(), "type", limits)?,
+        qualify_relation_validated(&e.schema, &e.name, "type", limits)?,
         values
     ))
 }
@@ -227,7 +242,7 @@ pub fn create_index_sql(
     limits: &SchemaLimits,
 ) -> Result<String, SchemaError> {
     validate_identifier(&index.name, "index", limits)?;
-    let target = quote_qualified(&format!("{schema}.{table}"), "table", limits)?;
+    let target = qualify_relation_validated(schema, table, "table", limits)?;
     let cols = index
         .columns
         .iter()
@@ -274,7 +289,7 @@ pub fn create_policy_sql(
     limits: &SchemaLimits,
 ) -> Result<String, SchemaError> {
     validate_identifier(&policy.name, "policy", limits)?;
-    let target = quote_qualified(&format!("{schema}.{table}"), "table", limits)?;
+    let target = qualify_relation_validated(schema, table, "table", limits)?;
     let mut sql = format!(
         "CREATE POLICY {} ON {}",
         quote_identifier(&policy.name),
@@ -377,16 +392,17 @@ PRIMARY KEY (\"id\")\n);";
 
     #[test]
     fn renders_enum_index_policy() {
+        // public is implicit (bare) across every emitter.
         let e = EnumTypeSpec::new("role", ["admin", "member"]);
         assert_eq!(
             create_type_sql(&e, &limits()).unwrap(),
-            "CREATE TYPE \"public\".\"role\" AS ENUM ('admin', 'member');"
+            "CREATE TYPE \"role\" AS ENUM ('admin', 'member');"
         );
 
         let idx = IndexSpec::new("idx_lower_email", [IndexColumn::expr("lower(email)")]).unique();
         assert_eq!(
             create_index_sql("public", "users", &idx, &limits()).unwrap(),
-            "CREATE UNIQUE INDEX \"idx_lower_email\" ON \"public\".\"users\" USING btree ((lower(email)) ASC);"
+            "CREATE UNIQUE INDEX \"idx_lower_email\" ON \"users\" USING btree ((lower(email)) ASC);"
         );
 
         let p = PolicySpec::new("p_select")
@@ -394,7 +410,45 @@ PRIMARY KEY (\"id\")\n);";
             .using("org_id = current_org()");
         assert_eq!(
             create_policy_sql("public", "docs", &p, &limits()).unwrap(),
-            "CREATE POLICY \"p_select\" ON \"public\".\"docs\" FOR SELECT USING (org_id = current_org());"
+            "CREATE POLICY \"p_select\" ON \"docs\" FOR SELECT USING (org_id = current_org());"
+        );
+    }
+
+    #[test]
+    fn non_public_schema_is_qualified_across_emitters() {
+        let table = PgTableSpec::new(
+            "stores",
+            vec![
+                ColumnSpec::new("id", PgType::Uuid).default_expr("gen_random_uuid()"),
+                ColumnSpec::new("organization_id", PgType::Uuid),
+            ],
+        )
+        .in_schema("rpm_pizza")
+        .primary_key(["id"]);
+        let sql = to_create_table_sql(&table, &limits()).unwrap();
+        assert!(
+            sql.starts_with("CREATE TABLE IF NOT EXISTS \"rpm_pizza\".\"stores\" ("),
+            "got: {sql}"
+        );
+
+        let e = EnumTypeSpec::new("task_category", ["open", "done"]).in_schema("rpm_pizza");
+        assert_eq!(
+            create_type_sql(&e, &limits()).unwrap(),
+            "CREATE TYPE \"rpm_pizza\".\"task_category\" AS ENUM ('open', 'done');"
+        );
+
+        let idx = IndexSpec::new("idx_org", [IndexColumn::column("organization_id")]);
+        assert_eq!(
+            create_index_sql("rpm_pizza", "stores", &idx, &limits()).unwrap(),
+            "CREATE INDEX \"idx_org\" ON \"rpm_pizza\".\"stores\" USING btree (\"organization_id\" ASC);"
+        );
+
+        let p = PolicySpec::new("p_select")
+            .for_command(PolicyFor::Select)
+            .using("organization_id = current_org()");
+        assert_eq!(
+            create_policy_sql("rpm_pizza", "stores", &p, &limits()).unwrap(),
+            "CREATE POLICY \"p_select\" ON \"rpm_pizza\".\"stores\" FOR SELECT USING (organization_id = current_org());"
         );
     }
 

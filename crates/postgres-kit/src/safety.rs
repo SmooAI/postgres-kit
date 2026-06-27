@@ -92,6 +92,22 @@ pub fn quote_identifier(name: &str) -> String {
     format!("\"{escaped}\"")
 }
 
+/// Qualify a *relation* name (a table, or an index/policy target) the way the
+/// whole kit agrees on: the `public` schema is left implicit (bare
+/// `"name"`), every other schema is rendered explicitly (`"schema"."name"`).
+/// This is the single convention shared by the standalone DDL emitters
+/// ([`crate::to_create_table_sql`] et al.) and the differ's statement renderer,
+/// and it matches drizzle-kit + Postgres norms. Each segment is quoted, so a
+/// name carrying SQL can't escape its position. Identifiers are *not* validated
+/// here — callers that accept untrusted input validate first.
+pub fn qualify_relation(schema: &str, name: &str) -> String {
+    if schema == "public" {
+        quote_identifier(name)
+    } else {
+        format!("{}.{}", quote_identifier(schema), quote_identifier(name))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,5 +159,14 @@ mod tests {
     fn quotes_and_escapes() {
         assert_eq!(quote_identifier("table"), "\"table\"");
         assert_eq!(quote_identifier("we\"ird"), "\"we\"\"ird\"");
+    }
+
+    #[test]
+    fn qualify_relation_leaves_public_implicit() {
+        assert_eq!(qualify_relation("public", "stores"), "\"stores\"");
+        assert_eq!(
+            qualify_relation("rpm_pizza", "stores"),
+            "\"rpm_pizza\".\"stores\""
+        );
     }
 }

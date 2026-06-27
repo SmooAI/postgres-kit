@@ -481,6 +481,43 @@ mod tests {
 
     #[cfg(feature = "differ")]
     #[test]
+    fn write_migration_preserves_raw_sql_before_policy() {
+        use crate::differ::ir::SnapPolicy;
+        use crate::differ::DdlStatement;
+
+        let dir = temp_dir();
+        let func = "CREATE FUNCTION rpm_pizza.is_store_manager(store uuid) RETURNS boolean AS $$ SELECT true $$ LANGUAGE sql;";
+        let written = write_drizzle_migration(
+            &dir,
+            "rpm",
+            &[
+                DdlStatement::RawSql(func.to_string()),
+                DdlStatement::CreatePolicy {
+                    schema: "rpm_pizza".to_string(),
+                    table: "task_instances".to_string(),
+                    policy: SnapPolicy::new("gm_select")
+                        .using("rpm_pizza.is_store_manager(store_id)"),
+                },
+            ],
+        )
+        .unwrap();
+
+        let body = std::fs::read_to_string(&written.path).unwrap();
+        let func_at = body.find("CREATE FUNCTION").expect("function present");
+        let policy_at = body.find("CREATE POLICY").expect("policy present");
+        assert!(func_at < policy_at, "raw function must precede the policy");
+
+        // The raw SQL round-trips back out as its own statement, verbatim.
+        let stmts = split_sql_statements(&body);
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[0].contains("CREATE FUNCTION rpm_pizza.is_store_manager"));
+        assert!(stmts[1].contains("CREATE POLICY"));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(feature = "differ")]
+    #[test]
     fn write_migration_rejects_unsafe_names() {
         let dir = temp_dir();
         let err = write_drizzle_migration(&dir, "../escape", &[]).unwrap_err();

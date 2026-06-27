@@ -4,11 +4,12 @@
 //! [`Plan::assemble`] then concatenates the buckets in a single fixed phase order
 //! that reproduces drizzle-kit's `sqlStatements` sequence:
 //!
-//! create types → enum moves/renames/recreate/add-values → sequences →
-//! roles → disable RLS → drop policies → drop dependents (FK/index/constraints)
-//! → drop tables → create tables → rename tables/columns → recreate/add/alter/
-//! drop columns → add constraints (checks/uniques/PKs/FKs) → create indexes →
-//! enable RLS → create/alter/rename policies → views → drop types.
+//! create schemas → create types → enum moves/renames/recreate/add-values →
+//! sequences → roles → disable RLS → drop policies → drop dependents
+//! (FK/index/constraints) → drop tables → create tables → rename tables/columns →
+//! recreate/add/alter/drop columns → add constraints (checks/uniques/PKs/FKs) →
+//! create indexes → raw SQL → enable RLS → create/alter/rename policies → views →
+//! drop types → drop schemas.
 
 use crate::differ::statement::DdlStatement;
 
@@ -16,6 +17,9 @@ use crate::differ::statement::DdlStatement;
 /// plan is [`Plan::assemble`]d into a single ordered statement list.
 #[derive(Debug, Default)]
 pub struct Plan {
+    // schemas (created first of all; dropped last of all)
+    pub create_schemas: Vec<DdlStatement>,
+
     // enums (created first; dropped last)
     pub create_enums: Vec<DdlStatement>,
     pub enum_set_schema: Vec<DdlStatement>,
@@ -61,6 +65,9 @@ pub struct Plan {
     pub add_foreign_keys: Vec<DdlStatement>,
     pub create_indexes: Vec<DdlStatement>,
 
+    // raw-SQL escape hatch (after tables/types/FKs/indexes, before RLS/policies)
+    pub raw_sql: Vec<DdlStatement>,
+
     // RLS / policies (after tables exist)
     pub enable_rls: Vec<DdlStatement>,
     pub create_policies: Vec<DdlStatement>,
@@ -74,12 +81,16 @@ pub struct Plan {
 
     // enums dropped last
     pub drop_enums: Vec<DdlStatement>,
+
+    // schemas dropped last of all (after their contents are gone)
+    pub drop_schemas: Vec<DdlStatement>,
 }
 
 impl Plan {
     /// Concatenate every bucket in the fixed phase order.
     pub fn assemble(self) -> Vec<DdlStatement> {
-        let buckets: [Vec<DdlStatement>; 39] = [
+        let buckets: [Vec<DdlStatement>; 41] = [
+            self.create_schemas,
             self.create_enums,
             self.enum_set_schema,
             self.rename_enums,
@@ -114,6 +125,7 @@ impl Plan {
             self.add_composite_pks,
             self.add_foreign_keys,
             self.create_indexes,
+            self.raw_sql,
             self.enable_rls,
             self.create_policies,
             self.alter_policies,
@@ -124,10 +136,12 @@ impl Plan {
         for b in buckets {
             out.extend(b);
         }
-        // drop_views / rename_views / drop_enums fold in after create_views.
+        // drop_views / rename_views / drop_enums fold in after create_views, and
+        // drop_schemas comes dead last (after every object in them is gone).
         out.extend(self.drop_views);
         out.extend(self.rename_views);
         out.extend(self.drop_enums);
+        out.extend(self.drop_schemas);
         out
     }
 }

@@ -18,7 +18,7 @@ use crate::differ::ir::{
     SnapColumn, SnapCompositePk, SnapEnum, SnapForeignKey, SnapIdentity, SnapIndex, SnapPolicy,
     SnapRole, SnapSequence, SnapTable, SnapUnique, SnapView,
 };
-use crate::safety::quote_identifier;
+use crate::safety::{qualify_relation, quote_identifier};
 use crate::spec::IdentityKind;
 
 /// Quote a possibly schema-qualified name, quoting each dotted segment so a name
@@ -31,13 +31,11 @@ fn qualify(name: &str) -> String {
 }
 
 /// Qualify a relation (table/index/policy target) the way drizzle does: the
-/// `public` schema is left implicit, every other schema is rendered.
+/// `public` schema is left implicit, every other schema is rendered. Delegates to
+/// the kit-wide [`qualify_relation`] so the differ and the standalone DDL emitters
+/// agree on one convention.
 fn qualify_table(schema: &str, name: &str) -> String {
-    if schema == "public" {
-        quote_identifier(name)
-    } else {
-        format!("{}.{}", quote_identifier(schema), quote_identifier(name))
-    }
+    qualify_relation(schema, name)
 }
 
 /// Join and quote a list of bare column names with no spaces (constraint lists).
@@ -73,6 +71,28 @@ fn render_roles(roles: &[String]) -> String {
 /// One DDL change. Each variant renders to exactly one SQL string.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DdlStatement {
+    // ---- schemas ----
+    /// `CREATE SCHEMA IF NOT EXISTS "name";` — ordered first, before any type or
+    /// table so objects in the schema have somewhere to land.
+    CreateSchema {
+        name: String,
+    },
+    /// `DROP SCHEMA IF EXISTS "name";` — ordered last, after everything in the
+    /// schema is gone.
+    DropSchema {
+        name: String,
+    },
+
+    // ---- raw escape hatch ----
+    /// Verbatim SQL the differ never emits itself — an escape hatch for things the
+    /// kit deliberately does not model (e.g. `CREATE FUNCTION ... SECURITY
+    /// DEFINER`, triggers, `GRANT`s). Rendered exactly as given (only trimmed).
+    ///
+    /// Ordering: assembled *after* table/type/foreign-key/index creation but
+    /// *before* `ENABLE ROW LEVEL SECURITY` and policy creation, so a helper
+    /// function injected here exists before any policy that references it.
+    RawSql(String),
+
     // ---- tables ----
     CreateTable(SnapTable),
     DropTable {
@@ -372,6 +392,14 @@ impl DdlStatement {
     /// Render this statement to SQL.
     pub fn to_sql(&self) -> String {
         match self {
+            DdlStatement::CreateSchema { name } => {
+                format!("CREATE SCHEMA IF NOT EXISTS {};", quote_identifier(name))
+            }
+            DdlStatement::DropSchema { name } => {
+                format!("DROP SCHEMA IF EXISTS {};", quote_identifier(name))
+            }
+            DdlStatement::RawSql(sql) => sql.trim().to_string(),
+
             DdlStatement::CreateTable(t) => render_create_table(t),
             DdlStatement::DropTable { schema, name } => {
                 format!("DROP TABLE {} CASCADE;", qualify_table(schema, name))
@@ -1136,6 +1164,45 @@ mod tests {
     fn create_role_lists_nondefault_options() {
         let s = DdlStatement::CreateRole(SnapRole::new("app").create_db(true));
         assert_eq!(s.to_sql(), r#"CREATE ROLE "app" WITH CREATEDB;"#);
+    }
+
+    #[test]
+    fn create_and_drop_schema_render_if_exists_guards() {
+        assert_eq!(
+            DdlStatement::CreateSchema {
+                name: "rpm_pizza".into()
+            }
+            .to_sql(),
+            r#"CREATE SCHEMA IF NOT EXISTS "rpm_pizza";"#
+        );
+        assert_eq!(
+            DdlStatement::DropSchema {
+                name: "rpm_pizza".into()
+            }
+            .to_sql(),
+            r#"DROP SCHEMA IF EXISTS "rpm_pizza";"#
+        );
+    }
+
+    #[test]
+    fn raw_sql_renders_verbatim_only_trimmed() {
+        let func = "  CREATE FUNCTION rpm_pizza.is_store_manager(uuid) RETURNS boolean SECURITY DEFINER AS $$ SELECT true $$ LANGUAGE sql;\n";
+        assert_eq!(
+            DdlStatement::RawSql(func.into()).to_sql(),
+            "CREATE FUNCTION rpm_pizza.is_store_manager(uuid) RETURNS boolean SECURITY DEFINER AS $$ SELECT true $$ LANGUAGE sql;"
+        );
+    }
+
+    #[test]
+    fn create_table_qualifies_non_public_schema() {
+        let t = SnapTable::new("rpm_pizza.stores")
+            .col(SnapColumn::new("id", "uuid").primary_key())
+            .col(SnapColumn::new("organization_id", "uuid").not_null());
+        let sql = DdlStatement::CreateTable(t).to_sql();
+        assert!(
+            sql.starts_with("CREATE TABLE \"rpm_pizza\".\"stores\" ("),
+            "got: {sql}"
+        );
     }
 
     #[test]

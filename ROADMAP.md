@@ -28,6 +28,13 @@ public crate carries no SmooAI specifics.
 - ✅ Conformance corpus ported from Drizzle Kit's permissively-licensed Postgres
   fixtures (snapshot-in → expected-DDL-out): **247 cases, 125 asserted, 122
   tracked `Skip`** (deferred categories below).
+- ✅ **Non-`public` schema support**: `CREATE SCHEMA` / `DROP SCHEMA` generation
+  (`SchemaSnapshot.schemas`, ordered first/last), the schema-qualify fix
+  (`to_create_table_sql` + all emitters share `qualify_relation`: `public`
+  implicit, non-`public` `"schema"."name"`), and a `DdlStatement::RawSql` escape
+  hatch (`SECURITY DEFINER` functions / triggers / grants, ordered before
+  policies) with `differ::assemble_create_migration`. See the runnable
+  `examples/rpm_pizza_schema.rs`.
 
 ## Done — migrations, drift, RLS
 
@@ -62,7 +69,9 @@ Tracked by the 122 `Skip` cases in `tests/differ_corpus.rs`:
 - Cross-category enum↔column moves: enum value add/remove/reorder when dependent
   table **columns** change data type (the largest skip cluster).
 - View / materialized-view `WITH` options, `TABLESPACE`, `USING` access method,
-  `SET SCHEMA`, and the drizzle `.existing()` flag — not modeled in the IR.
+  `SET SCHEMA`, and the drizzle `.existing()` flag — not modeled in the IR. (The
+  `CREATE SCHEMA` half of these skips is now done; what remains is the view
+  `WITH`-options / `.existing()` modeling they are bundled with.)
 - Policies linked to tables absent from the snapshot (drizzle
   `create_ind_policy` / `alter_ind_policy` on non-schema tables).
 - Custom identity sequence names (`SnapIdentity` has no name field).

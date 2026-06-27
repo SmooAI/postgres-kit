@@ -8,6 +8,27 @@ follows [Keep a Changelog](https://keepachangelog.com/); the project adheres to
 
 ### Added
 
+- **Non-`public` schema support** — build an app whose tables live in a dedicated
+  Postgres schema (e.g. `rpm_pizza`) cleanly, no hand-workarounds:
+    - `CREATE SCHEMA` generation: `SchemaSnapshot` now carries a `schemas` set
+      (non-`public` only); `lower` / `lower_tables` collect every schema referenced
+      by a table/enum/view/sequence; the differ emits
+      `CREATE SCHEMA IF NOT EXISTS "name"` first (and `DROP SCHEMA IF EXISTS` last)
+      via new `DdlStatement::CreateSchema` / `DropSchema` variants.
+    - **Raw-SQL escape hatch**: `DdlStatement::RawSql(String)` injects verbatim SQL
+      the kit deliberately doesn't model (`CREATE FUNCTION … SECURITY DEFINER`,
+      triggers, grants), ordered after table/type/FK/index creation but before
+      `ENABLE ROW LEVEL SECURITY` / policy creation so a helper function exists
+      before any policy that references it. New `differ::diff_with_raw_sql` and the
+      one-call `differ::assemble_create_migration(tables, enums, extra_raw)`.
+    - Runnable dogfood example `examples/rpm_pizza_schema.rs` (the consumer how-to)
+      + an ordering-contract integration test `tests/rpm_pizza.rs`.
+- **Schema-qualify fix** (bug): `to_create_table_sql` ignored `table.schema`, so a
+  `.in_schema("rpm_pizza")` table was created in the wrong schema. All emitters now
+  share one convention via `qualify_relation` — `public` implicit (bare),
+  non-`public` rendered `"schema"."name"`: `to_create_table_sql`,
+  `create_type_sql`, `create_index_sql`, `create_policy_sql`, and the differ's
+  statement renderer agree (foreign-key *targets* stay fully qualified, as before).
 - Initial crate scaffold (lib `postgres_kit`).
 - `PgType` closed Postgres type system with `to_sql_type` rendering (incl. enums,
   arrays, `varchar(n)`, `numeric(p,s)`).

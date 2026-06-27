@@ -19,6 +19,7 @@ mod indexes;
 mod order;
 mod policies;
 mod roles;
+mod schemas;
 mod sequences;
 mod tables;
 mod views;
@@ -31,13 +32,33 @@ use crate::differ::statement::DdlStatement;
 
 /// Diff `from` into `to`, returning the ordered migration statements.
 pub fn diff(from: &SchemaSnapshot, to: &SchemaSnapshot, hints: &RenameHints) -> Vec<DdlStatement> {
+    diff_with_raw_sql(from, to, hints, &[])
+}
+
+/// Diff `from` into `to`, additionally splicing caller-supplied raw SQL into the
+/// migration at the [`DdlStatement::RawSql`] phase (after table/type/FK/index
+/// creation, before RLS-enable and policy creation). The differ never produces
+/// raw SQL on its own — this is the seam for the things the kit deliberately
+/// does not model (`CREATE FUNCTION ... SECURITY DEFINER`, triggers, grants) so a
+/// helper function lands before any policy that references it.
+pub fn diff_with_raw_sql(
+    from: &SchemaSnapshot,
+    to: &SchemaSnapshot,
+    hints: &RenameHints,
+    raw_sql: &[String],
+) -> Vec<DdlStatement> {
     let mut plan = Plan::default();
 
+    schemas::diff(&mut plan, from, to);
     enums::diff(&mut plan, from, to, hints);
     sequences::diff(&mut plan, from, to, hints);
     roles::diff(&mut plan, from, to, hints);
     tables::diff(&mut plan, from, to, hints);
     views::diff(&mut plan, from, to, hints);
+
+    for sql in raw_sql {
+        plan.raw_sql.push(DdlStatement::RawSql(sql.clone()));
+    }
 
     plan.assemble()
 }

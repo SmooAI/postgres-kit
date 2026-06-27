@@ -59,7 +59,7 @@
 //! A single-column PK lives on the column ([`SnapColumn::primary_key`]); a
 //! multi-column PK is a [`SnapCompositePk`] added via [`SnapTable::composite_pk`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::spec::{IdentityKind, PolicyAs, PolicyFor};
 
@@ -77,6 +77,12 @@ fn split_qualified(qualified: &str) -> (String, String) {
 /// iteration.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SchemaSnapshot {
+    /// Non-`public` Postgres schemas this snapshot owns (e.g. `rpm_pizza`). The
+    /// `public` schema is implicit and never listed. The differ emits
+    /// `CREATE SCHEMA` for each name present in `to` but not `from` (and
+    /// `DROP SCHEMA` for the reverse). Populated by [`crate::differ::lower`] from
+    /// the schemas its tables/enums/views/sequences live in.
+    pub schemas: BTreeSet<String>,
     /// Tables keyed by `schema.table`.
     pub tables: BTreeMap<String, SnapTable>,
     /// Enum types keyed by `schema.name`.
@@ -103,6 +109,16 @@ pub struct SchemaSnapshotBuilder {
 }
 
 impl SchemaSnapshotBuilder {
+    /// Declare a non-`public` schema. `public` is implicit; passing it is a
+    /// no-op so callers can collect schema names unconditionally.
+    pub fn schema(mut self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        if name != "public" {
+            self.snapshot.schemas.insert(name);
+        }
+        self
+    }
+
     pub fn table(mut self, table: SnapTable) -> Self {
         self.snapshot.tables.insert(table.key(), table);
         self
@@ -751,5 +767,17 @@ mod tests {
         assert_eq!(t.schema, "public");
         assert_eq!(t.name, "widgets");
         assert_eq!(t.key(), "public.widgets");
+    }
+
+    #[test]
+    fn builder_collects_non_public_schemas_and_ignores_public() {
+        let snap = SchemaSnapshot::builder()
+            .schema("rpm_pizza")
+            .schema("public")
+            .schema("rpm_pizza")
+            .build();
+        assert!(snap.schemas.contains("rpm_pizza"));
+        assert!(!snap.schemas.contains("public"));
+        assert_eq!(snap.schemas.len(), 1);
     }
 }

@@ -58,7 +58,9 @@ pub use migrate::{
 };
 #[cfg(all(feature = "migrate", feature = "differ"))]
 pub use migrate::{write_drizzle_migration, WrittenMigration};
-pub use safety::{quote_identifier, validate_identifier, SchemaError, SchemaLimits};
+pub use safety::{
+    qualify_relation, quote_identifier, validate_identifier, SchemaError, SchemaLimits,
+};
 pub use spec::{
     CheckConstraintSpec, ColumnSpec, ColumnUnique, EnumTypeSpec, ForeignKeySpec, GeneratedColumn,
     IdentityKind, IdentitySpec, IndexColumn, IndexSpec, PgTableSpec, PgType, PolicyAs, PolicyFor,
