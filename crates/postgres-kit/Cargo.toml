@@ -56,3 +56,8 @@ sqlx = { version = "0.8", default-features = false, features = [
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 # Tenant tests model tenant/PK keys as UUIDs (the api-prime shape).
 uuid = { version = "1", features = ["v4"] }
+# Live-DB integration tests (`tests/integration.rs`) run a real Postgres in a
+# container. Gated behind `#[ignore]` so the default `cargo test` stays
+# Docker-free; CI runs them with `--ignored`.
+testcontainers = "0.27.3"
+testcontainers-modules = { version = "0.15.0", features = ["postgres"] }

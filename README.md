@@ -69,7 +69,7 @@ so the shipped crate stays driver-agnostic and tiny (serde + thiserror).
 
 ## Status
 
-Early. `CREATE TABLE` DDL, the type system, identifier safety, and the executor seam are in place and tested. The diff engine, migrations, drift, RLS policy diffing, codegen, and the tenant-scoped layer are landing per [`ROADMAP.md`](./ROADMAP.md). API is pre-1.0 and will move.
+Pre-1.0 but feature-complete on the core. Shipped and tested: the `PgType` type system, identifier safety, the `PgTableSpec` DSL, `CREATE TABLE` / index / enum / policy DDL, the BYO executor seam, the **diff engine** (`differ`, default — with a 247-case Drizzle-Kit conformance corpus, 125 asserted), **forward-only migrations** (`migrate`), the **drift gate** (`drift`), the **tenant-scoped query layer** (`tenant`, anti-IDOR), and **serde/sqlx + TS/Zod codegen** (`codegen`). A `#[ignore]`d testcontainers integration test exercises the engine against a real Postgres (CREATE + migrate + introspect round-trip + a generated RLS policy blocking a cross-tenant read). Deferred differ cases and follow-ups are tracked in [`ROADMAP.md`](./ROADMAP.md). API will still move before 1.0.
 
 ## License
 

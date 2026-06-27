@@ -43,7 +43,14 @@ pub mod migrate;
 pub mod drift;
 
 pub use client::{LiveColumn, PgError, PgExecutor};
+#[cfg(feature = "codegen")]
+pub use codegen::{
+    emit_insert_schema, emit_rust_module, emit_select_schema, emit_ts_module, insert_schema_name,
+    row_type_name, select_schema_name, CodegenError, CodegenOptions,
+};
 pub use ddl::{create_index_sql, create_policy_sql, create_type_sql, to_create_table_sql};
+#[cfg(feature = "drift")]
+pub use drift::{canonical_pg_type, check_drift, Drift, DriftResult};
 #[cfg(feature = "migrate")]
 pub use migrate::{
     read_drizzle_journal, run_migrations, split_sql_statements, DrizzleJournal,
