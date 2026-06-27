@@ -19,7 +19,23 @@ name = "postgres_kit"
 path = "src/lib.rs"
 
 [features]
-default = []
+# The diff engine (snapshot IR, lowering, DDL statements, rename hints) is the
+# always-on core of the kit.
+default = ["differ"]
+differ = []
+# Row-level-security helpers layered on the differ (reserved).
+rls = []
+# An optional first-party `sqlx` PgExecutor impl (reserved; BYO executor is the
+# default model and keeps the shipped crate dep-light).
+sqlx = []
+# Tenant-scoped typed query layer (stub, src/tenant.rs).
+tenant = []
+# serde/sqlx + TS/Zod row codegen (stub, src/codegen.rs).
+codegen = []
+# Forward-only `*.sql` migration runner (stub, src/migrate.rs).
+migrate = []
+# Read-only drift gate against a live schema (stub, src/drift.rs).
+drift = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

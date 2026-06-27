@@ -46,6 +46,8 @@ pub enum SchemaError {
     DuplicateColumn { table: String, name: String },
     #[error("primary key references unknown column {name:?} in table {table:?}")]
     UnknownPrimaryKeyColumn { table: String, name: String },
+    #[error("invalid rename hint {hint:?}: {reason}")]
+    InvalidRenameHint { hint: String, reason: &'static str },
 }
 
 /// Validate that `name` is a legal *unquoted* Postgres identifier within bounds.

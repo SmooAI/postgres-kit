@@ -22,7 +22,32 @@ mod ddl;
 mod safety;
 mod spec;
 
+/// The diff engine: snapshot IR, DSL lowering, DDL statements, and rename hints.
+#[cfg(feature = "differ")]
+pub mod differ;
+
+/// serde/sqlx + TS/Zod row codegen (scaffolding).
+#[cfg(feature = "codegen")]
+pub mod codegen;
+
+/// Tenant-scoped typed query layer (scaffolding).
+#[cfg(feature = "tenant")]
+pub mod tenant;
+
+/// Forward-only `*.sql` migration runner (scaffolding).
+#[cfg(feature = "migrate")]
+pub mod migrate;
+
+/// Read-only drift gate against a live schema (scaffolding).
+#[cfg(feature = "drift")]
+pub mod drift;
+
 pub use client::{LiveColumn, PgError, PgExecutor};
-pub use ddl::to_create_table_sql;
+pub use ddl::{create_index_sql, create_policy_sql, create_type_sql, to_create_table_sql};
 pub use safety::{quote_identifier, validate_identifier, SchemaError, SchemaLimits};
-pub use spec::{ColumnSpec, PgTableSpec, PgType};
+pub use spec::{
+    CheckConstraintSpec, ColumnSpec, ColumnUnique, EnumTypeSpec, ForeignKeySpec, GeneratedColumn,
+    IdentityKind, IdentitySpec, IndexColumn, IndexSpec, PgTableSpec, PgType, PolicyAs, PolicyFor,
+    PolicySpec, ReferentialAction, RoleSpec, SequenceOptions, SequenceSpec, UniqueConstraintSpec,
+    ViewSpec,
+};
