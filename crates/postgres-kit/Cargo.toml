@@ -1,0 +1,30 @@
+[package]
+name = "smooai-postgres-kit"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "Rust-native declarative Postgres schema toolkit: a PgTableSpec as the single source of truth for CREATE TABLE DDL, diff-based forward-only migrations, drift detection, serde/sqlx row codegen, and a safe-by-construction tenant-scoped sqlx layer."
+documentation = "https://docs.rs/smooai-postgres-kit"
+repository = "https://github.com/SmooAI/postgres-kit"
+homepage = "https://github.com/SmooAI/postgres-kit"
+readme = "README.md"
+keywords = ["postgres", "schema", "migrations", "sqlx", "multi-tenant"]
+categories = ["database", "data-structures"]
+
+# The package is `smooai-postgres-kit` (we're always smooai-scoped), but the
+# library imports as `postgres_kit` for ergonomics: `use postgres_kit::...`.
+[lib]
+name = "postgres_kit"
+path = "src/lib.rs"
+
+[features]
+default = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
