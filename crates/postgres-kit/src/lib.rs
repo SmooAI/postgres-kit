@@ -50,7 +50,7 @@ pub use codegen::{
 };
 pub use ddl::{create_index_sql, create_policy_sql, create_type_sql, to_create_table_sql};
 #[cfg(feature = "drift")]
-pub use drift::{canonical_pg_type, check_drift, Drift, DriftResult};
+pub use drift::{canonical_pg_type, check_drift, check_enum_drift, Drift, DriftResult};
 #[cfg(feature = "migrate")]
 pub use migrate::{
     read_journal, run_migrations, split_sql_statements, MigrationJournal, MigrationJournalEntry,

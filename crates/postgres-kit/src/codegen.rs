@@ -310,6 +310,8 @@ fn rust_element_type(ty: &PgType) -> String {
         PgType::Date => "::chrono::NaiveDate".into(),
         PgType::Jsonb | PgType::Json => "::serde_json::Value".into(),
         PgType::Bytea => "::std::vec::Vec<u8>".into(),
+        // tsvector / pgvector have no lossless scalar without an extra crate; decode as text.
+        PgType::Tsvector | PgType::Vector(_) => "::std::string::String".into(),
         // enums decode as text.
         PgType::Enum(_) => "::std::string::String".into(),
         PgType::Array(inner) => format!("::std::vec::Vec<{}>", rust_element_type(inner)),
@@ -329,9 +331,13 @@ fn rust_field_type(col: &ColumnSpec) -> String {
 /// The cast a column needs in the SELECT `COLUMNS` list, if any.
 fn cast_for(ty: &PgType) -> Option<Cast> {
     match ty {
-        PgType::Enum(_) | PgType::Numeric(_) => Some(Cast::Text),
+        PgType::Enum(_) | PgType::Numeric(_) | PgType::Tsvector | PgType::Vector(_) => {
+            Some(Cast::Text)
+        }
         PgType::Array(inner) => match **inner {
-            PgType::Enum(_) | PgType::Numeric(_) => Some(Cast::TextArray),
+            PgType::Enum(_) | PgType::Numeric(_) | PgType::Tsvector | PgType::Vector(_) => {
+                Some(Cast::TextArray)
+            }
             _ => None,
         },
         _ => None,
@@ -349,6 +355,8 @@ fn ts_element_type(ty: &PgType) -> String {
         | PgType::Timestamp
         | PgType::Date
         | PgType::Bytea
+        | PgType::Tsvector
+        | PgType::Vector(_)
         | PgType::Enum(_) => "string".into(),
         PgType::Bool => "boolean".into(),
         PgType::Int2 | PgType::Int4 | PgType::Int8 | PgType::Float4 | PgType::Float8 => {
@@ -370,6 +378,8 @@ fn zod_element_type(ty: &PgType) -> String {
         | PgType::Timestamp
         | PgType::Date
         | PgType::Bytea
+        | PgType::Tsvector
+        | PgType::Vector(_)
         | PgType::Enum(_) => "z.string()".into(),
         PgType::Bool => "z.boolean()".into(),
         PgType::Int2 | PgType::Int4 | PgType::Int8 | PgType::Float4 | PgType::Float8 => {

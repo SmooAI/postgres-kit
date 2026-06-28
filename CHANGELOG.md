@@ -8,6 +8,43 @@ follows [Keep a Changelog](https://keepachangelog.com/); the project adheres to
 
 ### Added
 
+- **`tsvector` / pgvector `vector` column types** — `PgType::Tsvector` (→ `tsvector`)
+  and `PgType::Vector(Option<u32>)` (→ `vector` / `vector(n)`) are now first-class:
+  `to_sql_type` renders them, codegen decodes them as text (Rust `String` via a
+  `::text` cast, TS/Zod `string`), and `canonical_pg_type` normalizes them in the
+  drift gate. Previously these only worked smuggled through `PgType::Enum`.
+- **Enum drift** — new `check_enum_drift(exec, &[EnumTypeSpec])` reports
+  `Drift::MissingEnumType` / `Drift::EnumValuesMismatch` (name + value *set*,
+  order-independent) by introspecting `pg_enum`.
+
+### Changed
+
+- **Name-agnostic drift** (`feature = "drift"`) — `check_drift` now matches foreign
+  keys, indexes, and policies by **definition instead of name**, eliminating
+  cosmetic-rename false positives (legacy constraint/index/policy names from
+  non-cascading table renames, 63-byte identifier truncation, and Postgres'
+  default `_fkey` naming):
+    - FK by `(from-columns, referenced table, to-columns, on-delete, on-update)`
+      via `pg_constraint` (referenced table defaults to the `public` schema so an
+      unqualified spec target lines up with the catalog's `nspname.relname`).
+    - Index by `(columns/expressions, unique, predicate, access method)` via
+      `pg_index` + `pg_get_indexdef` (predicates/expressions compared with
+      whitespace + parentheses stripped so the spec form matches the canonical
+      form Postgres echoes back).
+    - Policy by `(command, roles, using, with-check)` via `pg_policies` (an empty
+      `TO` list defaults to `public`; roles sorted).
+  The `Missing{ForeignKey,Index,Policy}` variants are unchanged on the wire — the
+  `name`/`constraint`/`policy` field now carries the spec's declared name for
+  reporting only.
+- **Extended drift coverage** — `check_drift` additionally compares (all
+  name-agnostic, best-effort): primary keys (`Drift::PrimaryKeyMismatch`, by
+  column *set*), unique constraints including column-level `UNIQUE`
+  (`Drift::MissingUniqueConstraint`, by column set + `NULLS NOT DISTINCT`), and
+  check constraints (`Drift::MissingCheckConstraint`, by normalized expression)
+  via `pg_constraint`.
+
+### Added (prior)
+
 - **Non-`public` schema support** — build an app whose tables live in a dedicated
   Postgres schema (e.g. `rpm_pizza`) cleanly, no hand-workarounds:
     - `CREATE SCHEMA` generation: `SchemaSnapshot` now carries a `schemas` set

@@ -28,6 +28,11 @@ pub enum PgType {
     Jsonb,
     Json,
     Bytea,
+    /// Full-text search vector (`tsvector`).
+    Tsvector,
+    /// A pgvector embedding column. `Vector(None)` renders `vector`; `Vector(Some(n))`
+    /// renders `vector(n)` (fixed-dimension).
+    Vector(Option<u32>),
     /// A named Postgres enum type (e.g. `CREATE TYPE managed_website_status AS ENUM (...)`).
     Enum(String),
     /// An array of the inner type, rendered as `<inner>[]`.
@@ -56,6 +61,9 @@ impl PgType {
             PgType::Jsonb => "jsonb".into(),
             PgType::Json => "json".into(),
             PgType::Bytea => "bytea".into(),
+            PgType::Tsvector => "tsvector".into(),
+            PgType::Vector(None) => "vector".into(),
+            PgType::Vector(Some(n)) => format!("vector({n})"),
             PgType::Enum(name) => name.clone(),
             PgType::Array(inner) => format!("{}[]", inner.to_sql_type()),
         }
@@ -756,6 +764,9 @@ mod tests {
         assert_eq!(PgType::Enum("status".into()).to_sql_type(), "status");
         assert_eq!(PgType::Timestamptz.to_sql_type(), "timestamptz");
         assert_eq!(PgType::Float8.to_sql_type(), "double precision");
+        assert_eq!(PgType::Tsvector.to_sql_type(), "tsvector");
+        assert_eq!(PgType::Vector(None).to_sql_type(), "vector");
+        assert_eq!(PgType::Vector(Some(1536)).to_sql_type(), "vector(1536)");
     }
 
     #[test]
