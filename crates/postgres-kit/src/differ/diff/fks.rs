@@ -10,7 +10,7 @@
 //!   [`DdlStatement::AlterForeignKey`] drop+recreate statement, also emitted in the
 //!   build phase (it carries its own inline `DROP CONSTRAINT`, so it does not go
 //!   through the teardown drop bucket — that would split the change across phases
-//!   and re-order it relative to drizzle's `alter_reference` output).
+//!   and re-order it relative to the expected `alter_reference` output).
 
 use crate::differ::ir::SnapTable;
 use crate::differ::statement::DdlStatement;

@@ -1,10 +1,9 @@
 //! Differ conformance cases for the `enums` category.
 //!
-//! Ported faithfully from `drizzle-orm/drizzle-kit/tests/pg-enums.test.ts`. Each
-//! upstream `test(...)` becomes one [`DiffCase`]: `schema1` -> [`DiffCase::from`],
-//! `schema2` -> [`DiffCase::to`], the `renames[]` argument copied verbatim into
-//! [`DiffCase::renames`], and the asserted `sqlStatements` copied verbatim into
-//! [`DiffCase::expected_sql`].
+//! A conformance corpus of enum-type schema-diff scenarios. Each scenario becomes
+//! one [`DiffCase`]: the two schemas map to [`DiffCase::from`] / [`DiffCase::to`],
+//! the rename hints into [`DiffCase::renames`], and the asserted statement output
+//! into [`DiffCase::expected_sql`].
 //!
 //! Pure enum-type operations (CREATE/DROP TYPE, ALTER TYPE ADD VALUE, SET SCHEMA,
 //! RENAME TO, and value-removal recreate) are [`Status::Supported`]. Cases that

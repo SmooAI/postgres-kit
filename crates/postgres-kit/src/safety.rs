@@ -97,7 +97,7 @@ pub fn quote_identifier(name: &str) -> String {
 /// `"name"`), every other schema is rendered explicitly (`"schema"."name"`).
 /// This is the single convention shared by the standalone DDL emitters
 /// ([`crate::to_create_table_sql`] et al.) and the differ's statement renderer,
-/// and it matches drizzle-kit + Postgres norms. Each segment is quoted, so a
+/// and it matches standard Postgres norms. Each segment is quoted, so a
 /// name carrying SQL can't escape its position. Identifiers are *not* validated
 /// here — callers that accept untrusted input validate first.
 pub fn qualify_relation(schema: &str, name: &str) -> String {

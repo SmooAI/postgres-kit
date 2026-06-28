@@ -3,8 +3,7 @@
 //! ADD VALUE`, positioned `BEFORE` the following surviving value) or, when a value
 //! is removed or reordered, a **recreate**: `DROP TYPE` + `CREATE TYPE`, plus a
 //! cascade over every dependent column (Postgres can't drop/reorder enum values in
-//! place). The cascade matches drizzle exactly — for each dependent column it
-//! detours the column through `text` and back:
+//! place). The cascade detours each dependent column through `text` and back:
 //!
 //! 1. `SET DATA TYPE text` (and, if defaulted, `SET DEFAULT '..'::text`)
 //! 2. `DROP TYPE` then `CREATE TYPE` with the new value list
@@ -209,7 +208,7 @@ fn recreate(plan: &mut Plan, to: &SchemaSnapshot, to_e: &SnapEnum) {
 
 /// Scan every table for columns whose (possibly array) type references `enum_name`.
 ///
-/// Drizzle cascades over dependent columns in schema-declaration order, which puts
+/// The cascade walks dependent columns in schema-declaration order, which puts
 /// the `public`-schema tables ahead of objects in named schemas. `to.tables` is a
 /// [`BTreeMap`] keyed by `schema.name`, which would otherwise float a `new_schema`
 /// table ahead of `public` (`'n' < 'p'`); a final stable sort restores the

@@ -1,6 +1,6 @@
 //! Column pass: renames first, then adds, drops, and per-column alterations
 //! (type / default / not-null / generated / identity). Generated-expression
-//! changes drop-and-readd the column (drizzle's lowercase `drop column` + `ADD
+//! changes drop-and-readd the column (a lowercase `drop column` + `ADD
 //! COLUMN` pair); dropping a generated expression is done in place.
 
 use std::collections::{BTreeMap, BTreeSet};

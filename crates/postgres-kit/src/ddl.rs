@@ -14,7 +14,7 @@ use crate::spec::{
 
 /// Validate and quote a possibly schema-qualified name (`schema.table`), quoting
 /// each segment. Used for foreign-key *targets*, which are always rendered
-/// fully qualified (drizzle + the differ both qualify FK targets, even `public`).
+/// fully qualified (the differ always qualifies FK targets, even `public`).
 fn quote_qualified(
     name: &str,
     kind: &'static str,

@@ -48,15 +48,15 @@ follows [Keep a Changelog](https://keepachangelog.com/); the project adheres to
   `Vec<DdlStatement>`, and `RenameHints` (table / column / enum / policy / role
   rename detection vs. drop+add). Covers tables, columns, checks, enums, generated
   & identity columns, RLS policies, roles, sequences, and views.
-- **Differ conformance corpus** (`tests/differ_corpus.rs`, ported from Drizzle
-  Kit's permissively-licensed Postgres fixtures): 258 cases — 198 asserted
+- **Differ conformance corpus** (`tests/differ_corpus.rs`): a conformance corpus
+  of Postgres schema-diff scenarios — 258 cases, 198 asserted
   (snapshot-in → expected-DDL-out under normalized comparison), 60 tracked as
   `Skip` for features outside the snapshot IR (see ROADMAP follow-ups).
 - **Deferred-corpus promotion** (phase 2): the previously-`Skip`'d differ
   categories are now asserted end-to-end —
     - **Views**: `WITH (...)` storage options, materialized-view `TABLESPACE`,
       `USING` access method, `SET SCHEMA`, in-place option `SET`/`RESET`, the
-      drizzle `.existing()` reference flag (`SnapView::reference`), and
+      "existing" (unmanaged) view reference flag (`SnapView::reference`), and
       DROP-before-CREATE recreate ordering. New `DdlStatement` variants
       `AlterViewSetSchema` / `AlterViewSetOptions` / `AlterViewResetOptions` /
       `AlterViewSetTablespace` / `AlterViewSetAccessMethod`; new `SnapView` fields
@@ -69,7 +69,7 @@ follows [Keep a Changelog](https://keepachangelog.com/); the project adheres to
       DROP-then-ADD `AlterForeignKey` statement (the "add multiple constraints"
       cases).
     - **Index alter / drop**: `DROP INDEX` omits the implicit `public` schema to
-      match drizzle's convertor.
+      match the expected rendering.
     - **Independent (schema-level) policies**: policies linked to a table absent
       from the snapshot, always schema-qualified — new `SnapIndPolicy` IR +
       `SchemaSnapshotBuilder::ind_policy`, `DdlStatement::{Create,Drop,Alter,Rename}IndPolicy`,
@@ -77,8 +77,8 @@ follows [Keep a Changelog](https://keepachangelog.com/); the project adheres to
       alongside their table-policy counterparts.
 - **Migrations** (`feature = "migrate"`): forward-only `run_migrations` over a
   `*.sql` directory with a `__pg_migrations` bookkeeping table (idempotent re-runs),
-  `split_sql_statements` (drizzle `--> statement-breakpoint` aware), and
-  drizzle-compatible journal I/O (`read_drizzle_journal`, `write_drizzle_migration`).
+  `split_sql_statements` (`--> statement-breakpoint` aware), and
+  migration-journal I/O (`read_journal`, `write_migration`).
 - **Drift gate** (`feature = "drift"`): `check_drift` compares specs vs. the live
   schema (missing table/column, extra column, type & nullability mismatch,
   best-effort missing index / FK / policy); `DriftResult::is_clean()` gates CI.
@@ -98,18 +98,26 @@ follows [Keep a Changelog](https://keepachangelog.com/); the project adheres to
 - Unit test suite covering DDL rendering, injection rejection, the executor seam,
   the diff engine per category, migrations, drift, the tenant builders, and codegen.
 
+### Changed
+
+- **Migration journal API renamed** (breaking) to neutral names independent of any
+  external toolkit. The journal writer is now `write_migration` (was
+  `write_…_migration`), the journal reader `read_journal` (was `read_…_journal`),
+  and the journal types `MigrationJournal` / `MigrationJournalEntry`. The on-disk
+  layout is unchanged (`meta/_journal.json`, `--> statement-breakpoint` markers).
+
 ### Follow-ups (tracked as corpus `Skip`s, deferred to later phases)
 
 - **Columns category** (the bulk of the remaining `Skip`s): column add / default
   add / data-type change cases — including every enum↔standard and enum↔enum
   data-type-change variant — are deferred to a dedicated columns-promotion pass.
-- Multi-construct **ordering** mismatches vs. drizzle's insertion order:
+- Multi-construct **ordering** mismatches vs. the corpus's insertion order:
   FK/index emission for multi-table creates (declaration order vs.
-  `BTreeMap`-sorted), composite-PK DROP+ADD joined into one drizzle breakpoint,
-  and multi-policy creation order (BTreeMap name-sorted vs. insertion order).
+  `BTreeMap`-sorted), composite-PK DROP+ADD joined into one breakpoint-delimited
+  string, and multi-policy creation order (BTreeMap name-sorted vs. insertion order).
 - **Tables/schema** "statements-only encoding" goldens (add/drop/move table,
-  multiproject schema) whose drizzle fixtures assert statements only, not
-  `sqlStatements`.
+  multiproject schema) whose corpus scenarios assert the structured statement
+  encoding only, not rendered SQL.
 - Enum **schema rename** (`ALTER SCHEMA`) — schemas are not modeled as renameable
   IR entities.
-- Error-case fixtures (duplicate view / constraint names that drizzle rejects).
+- Error-case fixtures (duplicate view / constraint names that Postgres rejects).

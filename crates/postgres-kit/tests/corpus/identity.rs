@@ -1,11 +1,11 @@
 //! Corpus category: `identity` — `GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY`
-//! columns (create / drop / alter), ported from drizzle-kit's
-//! `tests/pg-identity.test.ts`.
+//! columns (create / drop / alter). A conformance corpus of identity-column
+//! schema-diff scenarios.
 //!
 //! Mapping notes:
-//! - `pgTable('users', { id: integer('id').generatedByDefaultAsIdentity(...) })`
+//! - an identity column declaration
 //!   → a `public.users` table with a `SnapColumn::new("id", "integer")` carrying a
-//!   `SnapIdentity`. drizzle marks identity columns `notNull: true`, so each gets
+//!   `SnapIdentity`. Identity columns are marked `notNull: true`, so each gets
 //!   `.not_null()`.
 //! - `generatedByDefaultAsIdentity()` → [`SnapIdentity::by_default`];
 //!   `generatedAlwaysAsIdentity()` → [`SnapIdentity::always`]. Numeric params
@@ -13,12 +13,12 @@
 //!   strings on the snapshot; absent params stay `None` (the differ fills the
 //!   Postgres defaults: INCREMENT 1, MINVALUE 1, MAXVALUE 2147483647, START 1,
 //!   CACHE 1).
-//! - `sqlStatements` is the contract and is copied verbatim into `expected_sql`.
-//! - drizzle's `{ name: 'custom_seq' }` sets a custom identity *sequence name*,
+//! - the asserted statement output is the contract, copied into `expected_sql`.
+//! - a `{ name: 'custom_seq' }` option sets a custom identity *sequence name*,
 //!   carried on [`SnapIdentity::name`] and rendered inline (`sequence name
 //!   "custom_seq"`). Absent, the differ derives the Postgres-implicit
 //!   `{table}_{column}_seq`.
-//! - When `startWith` is omitted, Postgres (and drizzle) default the sequence
+//! - When `startWith` is omitted, Postgres defaults the sequence
 //!   start to `minValue` (then `1`) — see case "all params" below where
 //!   `minValue: 3` yields `START WITH 3` with no explicit start.
 
@@ -26,7 +26,7 @@ use postgres_kit::differ::ir::*;
 
 use super::{DiffCase, Status};
 
-/// An empty schema (the drizzle `from = {}` / `to = {}`).
+/// An empty schema (`from = {}` / `to = {}`).
 fn empty() -> SchemaSnapshot {
     SchemaSnapshot::builder().build()
 }

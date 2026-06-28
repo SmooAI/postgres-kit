@@ -3,12 +3,12 @@
 //! bookkeeping table so re-runs are idempotent. There is no auto-diff and no
 //! down-migration — schema change is expressed as ordered, append-only SQL files.
 //!
-//! The on-disk layout is **drizzle-compatible**: migration files live at the
-//! directory root (`NNNN_<tag>.sql`, statements separated by
+//! The on-disk layout follows a conventional migration-journal format: migration
+//! files live at the directory root (`NNNN_<tag>.sql`, statements separated by
 //! `--> statement-breakpoint`) and a `meta/_journal.json` records the ordered
 //! tags. This lets `pnpm db:generate` / `pnpm db:migrate:local` keep working
 //! against the same directory during a transition to this kit. Use
-//! [`write_drizzle_migration`] to emit a numbered file + journal entry from a
+//! [`write_migration`] to emit a numbered file + journal entry from a
 //! `Vec<DdlStatement>`, and [`run_migrations`] to apply them.
 
 use crate::client::{PgError, PgExecutor};
@@ -24,13 +24,13 @@ use serde::{Deserialize, Serialize};
 /// The bookkeeping table that records which migration files have been applied.
 const MIGRATIONS_TABLE: &str = "__pg_migrations";
 
-/// The drizzle statement separator written between rendered statements.
+/// The statement separator written between rendered statements.
 const STATEMENT_BREAKPOINT: &str = "--> statement-breakpoint";
 
-/// The drizzle journal schema version this kit reads and writes.
+/// The migration journal schema version this kit reads and writes.
 const JOURNAL_VERSION: &str = "7";
 
-/// The drizzle dialect tag for Postgres.
+/// The journal dialect tag for Postgres.
 const JOURNAL_DIALECT: &str = "postgresql";
 
 /// Outcome of a [`run_migrations`] pass.
@@ -49,7 +49,7 @@ pub struct MigrationRunResult {
 /// already present in `__pg_migrations` are skipped.
 ///
 /// Statements within a file are split on `--> statement-breakpoint` when present
-/// (the drizzle convention, robust to `;` inside function bodies), otherwise on
+/// (a convention robust to `;` inside function bodies), otherwise on
 /// `;`. Each file's statements run, then the filename is recorded; a mid-file
 /// failure leaves earlier statements applied but unrecorded, so a re-run replays
 /// from the start of that file.
@@ -131,7 +131,7 @@ fn discover_migration_files(dir: &Path) -> Result<Vec<String>, PgError> {
     Ok(files)
 }
 
-/// Split a migration file into individual statements. When the drizzle
+/// Split a migration file into individual statements. When the
 /// `--> statement-breakpoint` separator is present, split on it (robust to `;`
 /// inside `$$`-quoted function bodies); otherwise strip `--` line comments and
 /// split on `;`. Empty fragments are dropped either way.
@@ -165,22 +165,22 @@ fn strip_line_comments(sql: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Drizzle journal compatibility
+// Migration journal
 // ---------------------------------------------------------------------------
 
-/// A drizzle `meta/_journal.json` document: the ordered list of migration tags
-/// drizzle-kit maintains so `db:migrate` knows what to apply and in what order.
+/// A `meta/_journal.json` document: the ordered list of migration tags the kit
+/// maintains so `db:migrate` knows what to apply and in what order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DrizzleJournal {
-    /// Journal schema version (drizzle-kit currently emits `"7"`).
+pub struct MigrationJournal {
+    /// Journal schema version (currently `"7"`).
     pub version: String,
     /// SQL dialect (`"postgresql"`).
     pub dialect: String,
     /// Ordered migration entries, one per `NNNN_<tag>.sql` file.
-    pub entries: Vec<DrizzleJournalEntry>,
+    pub entries: Vec<MigrationJournalEntry>,
 }
 
-impl Default for DrizzleJournal {
+impl Default for MigrationJournal {
     fn default() -> Self {
         Self {
             version: JOURNAL_VERSION.to_string(),
@@ -190,12 +190,12 @@ impl Default for DrizzleJournal {
     }
 }
 
-/// A single entry in a drizzle journal.
+/// A single entry in the migration journal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DrizzleJournalEntry {
+pub struct MigrationJournalEntry {
     /// Zero-based ordinal, matching the `NNNN` filename prefix.
     pub idx: u32,
-    /// Per-entry schema version (mirrors [`DrizzleJournal::version`]).
+    /// Per-entry schema version (mirrors [`MigrationJournal::version`]).
     pub version: String,
     /// Creation time in Unix epoch milliseconds.
     pub when: u64,
@@ -210,18 +210,18 @@ fn journal_path(dir: &Path) -> std::path::PathBuf {
     dir.join("meta").join("_journal.json")
 }
 
-/// Read the drizzle journal from `<dir>/meta/_journal.json`. Returns a default
+/// Read the migration journal from `<dir>/meta/_journal.json`. Returns a default
 /// (empty) journal when the file does not exist.
-pub fn read_drizzle_journal(dir: &Path) -> Result<DrizzleJournal, PgError> {
+pub fn read_journal(dir: &Path) -> Result<MigrationJournal, PgError> {
     let path = journal_path(dir);
     match std::fs::read_to_string(&path) {
         Ok(contents) => Ok(serde_json::from_str(&contents)?),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(DrizzleJournal::default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(MigrationJournal::default()),
         Err(e) => Err(PgError::Io(e)),
     }
 }
 
-/// The result of [`write_drizzle_migration`]: the new file's tag and SQL path.
+/// The result of [`write_migration`]: the new file's tag and SQL path.
 #[cfg(feature = "differ")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WrittenMigration {
@@ -231,7 +231,7 @@ pub struct WrittenMigration {
     pub path: std::path::PathBuf,
 }
 
-/// Write a numbered, drizzle-compatible migration to `dir` from a list of
+/// Write a numbered migration to `dir` from a list of
 /// [`DdlStatement`]s, and append its entry to `<dir>/meta/_journal.json`.
 ///
 /// The next ordinal is `max(existing idx) + 1` (or `0` for a fresh directory),
@@ -240,7 +240,7 @@ pub struct WrittenMigration {
 /// filename-safe slug (`[A-Za-z0-9_-]+`); it is rejected otherwise so it can
 /// never escape `dir`.
 #[cfg(feature = "differ")]
-pub fn write_drizzle_migration(
+pub fn write_migration(
     dir: &Path,
     name: &str,
     statements: &[DdlStatement],
@@ -255,7 +255,7 @@ pub fn write_drizzle_migration(
         )));
     }
 
-    let mut journal = read_drizzle_journal(dir)?;
+    let mut journal = read_journal(dir)?;
     let idx = journal
         .entries
         .iter()
@@ -273,7 +273,7 @@ pub fn write_drizzle_migration(
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    journal.entries.push(DrizzleJournalEntry {
+    journal.entries.push(MigrationJournalEntry {
         idx,
         version: JOURNAL_VERSION.to_string(),
         when,
@@ -294,7 +294,7 @@ pub fn write_drizzle_migration(
     })
 }
 
-/// Render statements into a drizzle-style migration body: each statement's SQL
+/// Render statements into a migration body: each statement's SQL
 /// separated by a `--> statement-breakpoint` marker line.
 #[cfg(feature = "differ")]
 fn render_migration_body(statements: &[DdlStatement]) -> String {
@@ -369,9 +369,9 @@ mod tests {
     }
 
     #[test]
-    fn splits_on_drizzle_breakpoints() {
+    fn splits_on_statement_breakpoints() {
         // A `;` inside a function body must NOT split a statement when the
-        // drizzle breakpoint marker is present.
+        // statement-breakpoint marker is present.
         let sql =
             "CREATE FUNCTION f() RETURNS int AS $$ BEGIN RETURN 1; END; $$ LANGUAGE plpgsql;\n\
                    --> statement-breakpoint\n\
@@ -431,7 +431,7 @@ mod tests {
 
         let dir = temp_dir();
 
-        let first = write_drizzle_migration(
+        let first = write_migration(
             &dir,
             "init",
             &[DdlStatement::DropTable {
@@ -443,7 +443,7 @@ mod tests {
         assert_eq!(first.tag, "0000_init");
         assert!(first.path.exists());
 
-        let second = write_drizzle_migration(
+        let second = write_migration(
             &dir,
             "more",
             &[DdlStatement::DropTable {
@@ -455,7 +455,7 @@ mod tests {
         assert_eq!(second.tag, "0001_more");
 
         // Journal records both entries, in order, with the expected shape.
-        let journal = read_drizzle_journal(&dir).unwrap();
+        let journal = read_journal(&dir).unwrap();
         assert_eq!(journal.version, "7");
         assert_eq!(journal.dialect, "postgresql");
         assert_eq!(journal.entries.len(), 2);
@@ -487,7 +487,7 @@ mod tests {
 
         let dir = temp_dir();
         let func = "CREATE FUNCTION rpm_pizza.is_store_manager(store uuid) RETURNS boolean AS $$ SELECT true $$ LANGUAGE sql;";
-        let written = write_drizzle_migration(
+        let written = write_migration(
             &dir,
             "rpm",
             &[
@@ -520,9 +520,9 @@ mod tests {
     #[test]
     fn write_migration_rejects_unsafe_names() {
         let dir = temp_dir();
-        let err = write_drizzle_migration(&dir, "../escape", &[]).unwrap_err();
+        let err = write_migration(&dir, "../escape", &[]).unwrap_err();
         assert!(matches!(err, PgError::Backend(_)));
-        assert!(write_drizzle_migration(&dir, "", &[]).is_err());
+        assert!(write_migration(&dir, "", &[]).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -1,8 +1,8 @@
 # Roadmap
 
 `smooai-postgres-kit` makes a Rust `PgTableSpec` the single source of truth for
-the Postgres layer — taking over migrations from Drizzle Kit and deriving rows,
-the typed sqlx layer, and TS/Zod types from one declaration. Tracked internally
+the Postgres layer — owning declarative, diff-based schema-as-code migrations and
+deriving rows, the typed sqlx layer, and TS/Zod types from one declaration. Tracked internally
 as SMOODEV-2119 (ADR-048); the Postgres counterpart to `smooai-clickhouse-kit`.
 
 The generic engine is vendor-neutral and gated behind cargo features so the
@@ -25,8 +25,8 @@ public crate carries no SmooAI specifics.
   columns, enums, policies, and roles; checks, generated & identity columns,
   enums, RLS policies, roles, sequences, and views. _Cargo feature: `differ`
   (default)._
-- ✅ Conformance corpus ported from Drizzle Kit's permissively-licensed Postgres
-  fixtures (snapshot-in → expected-DDL-out): **258 cases, 198 asserted, 60
+- ✅ Conformance corpus of Postgres schema-diff scenarios
+  (snapshot-in → expected-DDL-out): **258 cases, 198 asserted, 60
   tracked `Skip`** (deferred categories below).
 - ✅ **Phase-2 deferred-corpus promotion**: views (`WITH` options / `TABLESPACE`
   / `USING` / `SET SCHEMA` / `.existing()` reference / DROP-before-CREATE
@@ -44,8 +44,8 @@ public crate carries no SmooAI specifics.
 ## Done — migrations, drift, RLS
 
 - ✅ **Migrations** (`feature = "migrate"`) — forward-only `run_migrations` +
-  `__pg_migrations` bookkeeping table (idempotent); drizzle
-  `--> statement-breakpoint` splitting and `_journal.json`-compatible read/write
+  `__pg_migrations` bookkeeping table (idempotent);
+  `--> statement-breakpoint` splitting and `meta/_journal.json` read/write
   for the transition.
 - ✅ **Drift** (`feature = "drift"`) — `check_drift` compares the spec set vs the
   live DB (missing/extra column, type & nullability mismatch, best-effort missing
@@ -74,15 +74,16 @@ Tracked by the 60 remaining `Skip` cases in `tests/differ_corpus.rs`:
 - **Columns category** (the largest remaining cluster): column add / default add /
   data-type change — including every enum↔standard and enum↔enum data-type-change
   variant — deferred to a dedicated columns-promotion pass.
-- Multi-construct **ordering** mismatches vs drizzle's insertion order:
+- Multi-construct **ordering** mismatches vs the corpus's insertion order:
   multi-table-create FK/index emission (declaration order vs `BTreeMap`-sorted),
-  composite-PK DROP+ADD joined into one drizzle breakpoint, and multi-policy
+  composite-PK DROP+ADD joined into one breakpoint-delimited string, and multi-policy
   creation order (name-sorted vs insertion order).
 - **Tables/schema** "statements-only encoding" goldens (add/drop/move table,
-  multiproject schema) whose fixtures assert statements, not `sqlStatements`.
+  multiproject schema) whose scenarios assert the structured statement encoding,
+  not rendered SQL.
 - Enum **schema rename** (`ALTER SCHEMA`) — schemas not modeled as renameable IR
   entities.
-- Error-case fixtures (duplicate view / constraint names drizzle rejects).
+- Error-case fixtures (duplicate view / constraint names Postgres rejects).
 
 ## Non-goals (for now)
 

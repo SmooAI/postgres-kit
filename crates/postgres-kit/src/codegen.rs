@@ -3,7 +3,7 @@
 //! [`crate::spec::PgTableSpec`] — the single source of truth.
 //!
 //! This is the Rust-native port of the smooai `gen-rust-rows.mts` generator (which
-//! read the Drizzle schema) folded together with the `@smooai/clickhouse-kit`
+//! read the schema definition) folded together with the `@smooai/clickhouse-kit`
 //! TS/Zod emitter. Because a [`PgTableSpec`] already knows the real Postgres column
 //! types, the row is a drop-in decode target:
 //!

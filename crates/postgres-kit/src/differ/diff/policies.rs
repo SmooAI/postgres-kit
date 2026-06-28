@@ -4,7 +4,7 @@
 //! Row-level-security enable/disable is diffed from the table's `rls_enabled`.
 //!
 //! [`diff_independent`] handles *schema-level* (independent) policies — those
-//! linked to a table that is **absent** from the snapshot (drizzle's
+//! linked to a table that is **absent** from the snapshot (e.g. a
 //! `pgPolicy(...).link(<table not in the schema>)`, emitted as
 //! `create_ind_policy` / `drop_ind_policy` / `alter_ind_policy` /
 //! `rename_ind_policy`). They live in [`SchemaSnapshot::ind_policies`] rather than
@@ -126,7 +126,7 @@ pub fn diff(plan: &mut Plan, from_t: &SnapTable, to_t: &SnapTable, hints: &Renam
 ///
 /// Ordering is via dedicated `Plan` buckets that sit immediately after their
 /// in-table counterparts: a mixed diff therefore emits table-policy creates before
-/// independent-policy creates (matching drizzle), and an `AS`/`FOR` change still
+/// independent-policy creates, and an `AS`/`FOR` change still
 /// drops (teardown phase) before it recreates (build phase).
 pub fn diff_independent(
     plan: &mut Plan,

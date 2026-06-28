@@ -1,9 +1,9 @@
 //! The lean [`DdlStatement`] IR — one variant per SQL change the differ emits,
 //! each rendering to a single SQL string via [`DdlStatement::to_sql`].
 //!
-//! Rendering matches drizzle-kit's `sqlStatements` output token-for-token (the
+//! Rendering matches the conformance corpus's expected SQL token-for-token (the
 //! differ conformance corpus compares against it under whitespace-normalized
-//! equality). Notable drizzle conventions reproduced here:
+//! equality). Notable rendering conventions:
 //!
 //! - **`public` schema is implicit for relations** (tables, indexes, policies):
 //!   `CREATE TABLE "users"`, not `"public"."users"`. Types, views, sequences and
@@ -30,7 +30,7 @@ fn qualify(name: &str) -> String {
         .join(".")
 }
 
-/// Qualify a relation (table/index/policy target) the way drizzle does: the
+/// Qualify a relation (table/index/policy target): the
 /// `public` schema is left implicit, every other schema is rendered. Delegates to
 /// the kit-wide [`qualify_relation`] so the differ and the standalone DDL emitters
 /// agree on one convention.
@@ -121,7 +121,7 @@ pub enum DdlStatement {
         table: String,
         column: String,
     },
-    /// Lowercase `drop column` form drizzle emits when *recreating* a column
+    /// Lowercase `drop column` form emitted when *recreating* a column
     /// (e.g. a changed generated expression), as a drop+add pair.
     DropColumnForRecreate {
         schema: String,
@@ -989,8 +989,8 @@ pub fn render_column_def(table: &str, col: &SnapColumn) -> String {
     if col.primary_key {
         def.push_str(" PRIMARY KEY");
     }
-    // An identity column is implicitly NOT NULL — drizzle never renders the
-    // keyword for it.
+    // An identity column is implicitly NOT NULL — the keyword is never rendered
+    // for it.
     if col.not_null && col.identity.is_none() {
         def.push_str(" NOT NULL");
     }
@@ -1007,7 +1007,7 @@ pub fn render_column_def(table: &str, col: &SnapColumn) -> String {
 }
 
 /// Render the ` GENERATED <kind> AS IDENTITY (sequence name ... )` clause, filling
-/// the Postgres `integer` identity defaults drizzle bakes in.
+/// the Postgres `integer` identity defaults baked in.
 fn render_identity_inline(table: &str, column: &str, id: &SnapIdentity) -> String {
     let seq_name = id
         .name

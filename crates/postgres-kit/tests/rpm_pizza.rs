@@ -133,7 +133,7 @@ fn migration_is_ordered_schema_type_table_fk_raw_policy() {
         .any(|s| s.starts_with(r#"CREATE TABLE "rpm_pizza"."task_instances" ("#)));
 
     // 5. The cross-schema FK targets a public table. FK *targets* are always
-    //    fully qualified (drizzle + the differ both qualify FK targets).
+    //    fully qualified (the differ always qualifies FK targets).
     assert!(sql
         .iter()
         .any(|s| s.contains("ADD CONSTRAINT \"ti_content_item_fk\"")

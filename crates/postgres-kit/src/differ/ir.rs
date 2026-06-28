@@ -245,7 +245,7 @@ impl SnapTable {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapIdentity {
     pub kind: IdentityKind,
-    /// Custom identity sequence name (drizzle's `{ name: 'custom_seq' }`). When
+    /// Custom identity sequence name (e.g. `{ name: 'custom_seq' }`). When
     /// `None`, the renderer derives the Postgres-implicit `{table}_{column}_seq`.
     pub name: Option<String>,
     pub increment: Option<String>,
@@ -660,10 +660,10 @@ pub struct SnapView {
     pub name: String,
     pub definition: Option<String>,
     pub materialized: bool,
-    /// drizzle `.existing()` — a reference to a DB view the kit does not manage.
+    /// Marks a reference to a DB view the kit does not manage (an "existing" view).
     pub existing: bool,
     /// `WITH (...)` storage params: snake_cased key -> rendered value. BTreeMap so
-    /// rendering is alphabetical, matching drizzle's option order.
+    /// rendering is alphabetical (a stable option order).
     pub with_options: BTreeMap<String, String>,
     /// `TABLESPACE` (materialized views only).
     pub tablespace: Option<String>,
@@ -698,7 +698,7 @@ impl SnapView {
         self
     }
 
-    /// A drizzle `.existing()` view: no managed definition, never emitted as DDL.
+    /// An "existing" (unmanaged) view: no managed definition, never emitted as DDL.
     pub fn reference(qualified: impl AsRef<str>) -> Self {
         let (schema, name) = split_qualified(qualified.as_ref());
         Self {

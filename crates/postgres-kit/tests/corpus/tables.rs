@@ -1,18 +1,19 @@
-//! `tables` differ corpus — ported from drizzle-kit's `tests/pg-tables.test.ts`.
+//! `tables` differ corpus — a conformance corpus of table schema-diff scenarios.
 //!
-//! Each [`DiffCase`] mirrors one `test(...)` in that file: `schema1` -> `from`,
-//! `schema2` -> `to`, the rename hints copied verbatim into `renames`, and the
-//! asserted `sqlStatements` copied verbatim into `expected_sql`.
+//! Each [`DiffCase`] is one scenario: the two schemas map to `from` / `to`, the
+//! rename hints into `renames`, and the asserted statement output into
+//! `expected_sql`.
 //!
-//! Tests that assert ONLY the `statements` IR (no `sqlStatements`) carry no SQL
-//! contract, so they are `Skip("statements-only encoding")` — their `from`/`to`
-//! snapshots are still authored faithfully so the differ agent can promote them.
+//! Scenarios that assert ONLY the structured statement IR (no rendered SQL) carry
+//! no SQL contract, so they are `Skip("statements-only encoding")` — their
+//! `from`/`to` snapshots are still authored faithfully so the differ agent can
+//! promote them.
 
 use postgres_kit::differ::ir::*;
 
 use super::{DiffCase, Status};
 
-/// Empty schema (`{}` in the drizzle tests).
+/// Empty schema (an empty `{}` schema).
 fn empty() -> SchemaSnapshot {
     SchemaSnapshot::default()
 }
@@ -414,7 +415,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" DROP CONSTRAINT \"table_pk\";\n--> statement-breakpoint\nALTER TABLE \"table\" ADD CONSTRAINT \"table_pk\" PRIMARY KEY(\"col2\",\"col3\");",
             ],
             status: Status::Skip(
-                "drizzle joins DROP+ADD PK into one breakpoint-delimited string; differ emits separate statements",
+                "expected output joins DROP+ADD PK into one breakpoint-delimited string; differ emits separate statements",
             ),
         },
         // ---- add index with op ----
@@ -580,7 +581,7 @@ pub fn cases() -> Vec<DiffCase> {
         },
         // ---- alter foreign key: add ON DELETE cascade ----
         // Postgres has no in-place FK alter, so a changed referential action is a
-        // drop+recreate, emitted as drizzle's single `alter_reference` statement.
+        // drop+recreate, emitted as a single `alter_reference` statement.
         DiffCase {
             name: "alter foreign key add on delete cascade",
             from: fk_pair(SnapForeignKey::new(

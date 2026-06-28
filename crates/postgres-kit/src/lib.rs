@@ -53,11 +53,11 @@ pub use ddl::{create_index_sql, create_policy_sql, create_type_sql, to_create_ta
 pub use drift::{canonical_pg_type, check_drift, Drift, DriftResult};
 #[cfg(feature = "migrate")]
 pub use migrate::{
-    read_drizzle_journal, run_migrations, split_sql_statements, DrizzleJournal,
-    DrizzleJournalEntry, MigrationRunResult,
+    read_journal, run_migrations, split_sql_statements, MigrationJournal, MigrationJournalEntry,
+    MigrationRunResult,
 };
 #[cfg(all(feature = "migrate", feature = "differ"))]
-pub use migrate::{write_drizzle_migration, WrittenMigration};
+pub use migrate::{write_migration, WrittenMigration};
 pub use safety::{
     qualify_relation, quote_identifier, validate_identifier, SchemaError, SchemaLimits,
 };

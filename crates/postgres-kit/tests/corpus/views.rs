@@ -1,16 +1,15 @@
 //! Differ corpus — category `views`.
 //!
-//! Ported faithfully from drizzle-kit's `tests/pg-views.test.ts`. Each `test(...)`
-//! there calls `diffTestSchemas(schema1, schema2, renames)` and asserts a
-//! `sqlStatements` array; we translate `schema1 -> from`, `schema2 -> to`, copy
-//! `renames` verbatim, and copy the asserted `sqlStatements` into `expected_sql`.
+//! A conformance corpus of view schema-diff scenarios. Each scenario diffs
+//! `schema1 -> from`, `schema2 -> to` with rename hints and asserts a statement
+//! array in `expected_sql`.
 //!
 //! [`SnapView`] now models `WITH (...)` options (snake-cased key -> rendered value,
 //! kept alphabetical via the BTreeMap), `TABLESPACE`, `USING` (access method),
-//! `WITH NO DATA`, materialized-ness, and the drizzle `.existing()` flag (built via
-//! [`SnapView::reference`]). The only remaining [`Status::Skip`] cases are the two
-//! error-path tests (duplicate view names that drizzle rejects), which the differ
-//! does not model.
+//! `WITH NO DATA`, materialized-ness, and the "existing" (unmanaged) view flag
+//! (built via [`SnapView::reference`]). The only remaining [`Status::Skip`] cases
+//! are the two error-path scenarios (duplicate view names that Postgres rejects),
+//! which the differ does not model.
 
 use super::{DiffCase, Status};
 use postgres_kit::differ::ir::{SchemaSnapshot, SnapColumn, SnapTable, SnapView};
@@ -26,7 +25,7 @@ fn new_schema_users_table() -> SnapTable {
         .col(SnapColumn::new("id", "integer").primary_key().not_null())
 }
 
-/// The verbatim `CREATE TABLE "users"` statement drizzle emits for `users_table`.
+/// The verbatim `CREATE TABLE "users"` statement emitted for `users_table`.
 const CREATE_USERS_TABLE: &str =
     "CREATE TABLE \"users\" (\n\t\"id\" integer PRIMARY KEY NOT NULL\n);\n";
 

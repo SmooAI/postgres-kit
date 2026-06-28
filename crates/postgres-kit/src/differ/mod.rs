@@ -50,7 +50,7 @@ pub fn diff_with_raw_sql(
 /// foreign keys → indexes → **raw SQL** → `ENABLE ROW LEVEL SECURITY` → policies.
 /// This is the one-call path for a downstream that wants to stand up a
 /// non-`public` schema with the kit; pair it with
-/// [`crate::write_drizzle_migration`] to emit the `.sql` file.
+/// [`crate::write_migration`] to emit the `.sql` file.
 pub fn assemble_create_migration(
     tables: &[PgTableSpec],
     enums: &[EnumTypeSpec],

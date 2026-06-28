@@ -5,9 +5,9 @@
 //! `WHERE` predicate, or uniqueness), so a *changed* index is migrated by
 //! dropping the old definition and creating the new one.
 //!
-//! To stay byte-for-byte with drizzle-kit's `sqlStatements`, an alter is emitted
-//! as **two distinct statements**, not one combined string: drizzle represents a
-//! changed index as a separate `drop_index` and `create_index_pg` pair. The
+//! To match the conformance corpus, an alter is emitted
+//! as **two distinct statements**, not one combined string: a changed index is
+//! represented as a separate `drop_index` and `create_index_pg` pair. The
 //! `DROP INDEX` therefore lands in the teardown/drop phase (alongside the other
 //! drops) and the `CREATE INDEX` in the later index-build phase — the
 //! [`DdlStatement::AlterIndex`] combined form is intentionally *not* used here.

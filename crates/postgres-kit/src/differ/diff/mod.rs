@@ -8,7 +8,7 @@
 //! as a rename/move and removes *both* names from the add/drop pools, so a hinted
 //! rename never degrades into a destructive drop+add. Every pass appends to the
 //! phase buckets of a [`Plan`]; [`order`] concatenates them into the final,
-//! drizzle-compatible statement order.
+//! deterministic statement order.
 
 mod columns;
 mod constraints;

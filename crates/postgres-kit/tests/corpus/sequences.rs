@@ -1,14 +1,13 @@
 //! Corpus category: `sequences`.
 //!
-//! Ported verbatim from drizzle-kit's `tests/pg-sequences.test.ts`. Each case
-//! translates `schema1` → [`DiffCase::from`] and `schema2` → [`DiffCase::to`] as
-//! [`SchemaSnapshot`] literals, copies the `renames` hints verbatim, and copies
-//! the asserted `sqlStatements` array into `expected_sql`.
+//! A conformance corpus of sequence schema-diff scenarios. Each case
+//! maps `from`/`to` schemas as [`SchemaSnapshot`] literals, the `renames` hints,
+//! and the asserted statement array into `expected_sql`.
 //!
-//! Sequence defaults (drizzle `pgSequence(name, opts)`): unspecified options fall
+//! Sequence defaults: unspecified options fall
 //! back to `increment: '1'`, `minValue: '1'`, `maxValue: '9223372036854775807'`,
 //! `cache: '1'`, `cycle: false`. The snapshot below records only the options the
-//! drizzle schema actually sets (leaving the rest `None`); the differ is
+//! schema actually sets (leaving the rest `None`); the differ is
 //! responsible for filling the defaults when it renders the SQL.
 
 use postgres_kit::differ::ir::*;
@@ -16,7 +15,7 @@ use postgres_kit::differ::SchemaSnapshot;
 
 use super::{DiffCase, Status};
 
-/// Build a [`SnapSequence`] setting exactly the fields the drizzle schema does.
+/// Build a [`SnapSequence`] setting exactly the fields the schema does.
 /// `SnapSequence` only ships builders for `increment`/`start_with`/`cycle`, so the
 /// remaining (public) fields are assigned directly.
 fn seq(

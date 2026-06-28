@@ -80,7 +80,7 @@ fn alter_existing(
     policies::diff(plan, from_t, to_t, hints);
 }
 
-/// Emit `CREATE TABLE` plus the out-of-line objects drizzle creates separately
+/// Emit `CREATE TABLE` plus the out-of-line objects created separately
 /// (RLS toggle, policies, foreign keys, indexes). Columns, composite PKs, unique
 /// and check constraints are rendered inline by `CREATE TABLE`.
 fn create_table(plan: &mut Plan, t: &SnapTable) {

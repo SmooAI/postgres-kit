@@ -1,15 +1,14 @@
 //! Corpus category: `generated` (STORED generated columns).
 //!
-//! Ported verbatim from drizzle-kit's `tests/pg-generated.test.ts`. Every test in
-//! that file exercises `text(...).generatedAlwaysAs(...)` in three flavors
-//! (callback / sql / string), but all three produce the *same* normalized
-//! `generated` expression and therefore the same emitted SQL. We mirror each test
-//! faithfully: `schema1 -> from`, `schema2 -> to`, `renames` verbatim, and the
-//! asserted `sqlStatements` copied into `expected_sql`.
+//! A conformance corpus of STORED generated-column schema-diff scenarios. A schema
+//! may declare a generated column in three flavors (callback / sql / string), but
+//! all three produce the *same* normalized `generated` expression and therefore the
+//! same emitted SQL. Each scenario maps `from`/`to` schemas, `renames` hints, and
+//! the asserted statement output into a [`DiffCase`].
 //!
-//! Column name note: drizzle's field `generatedName: text('gen_name')` has DB
-//! column name `gen_name` (the snapshot keys by DB column name), so renaming the
-//! *field* (e.g. `generatedName -> generatedName1`) with the same `text('gen_name')`
+//! Column name note: a field named `generatedName` with DB column name `gen_name`
+//! is keyed by its DB column name in the snapshot, so renaming the *field* (e.g.
+//! `generatedName -> generatedName1`) while keeping the DB column `gen_name`
 //! is a no-op rename here — both `from` and `to` key the column as `gen_name`.
 
 use super::{DiffCase, Status};
@@ -47,7 +46,7 @@ fn add_column_with_generated(name: &'static str) -> DiffCase {
 
 /// `add generated constraint to an existing column`: `gen_name` exists in `from`
 /// as a plain NOT NULL column, and gains a STORED generated expression in `to`.
-/// drizzle drops and re-adds the column.
+/// The column is dropped and re-added.
 fn add_generated_to_existing(name: &'static str) -> DiffCase {
     DiffCase {
         name,
@@ -69,7 +68,7 @@ fn add_generated_to_existing(name: &'static str) -> DiffCase {
 }
 
 /// `drop generated constraint`: `gen_name` is a STORED generated column in `from`
-/// and a plain column in `to`. drizzle drops the expression in place.
+/// and a plain column in `to`. The expression is dropped in place.
 fn drop_generated(name: &'static str) -> DiffCase {
     DiffCase {
         name,
@@ -83,8 +82,8 @@ fn drop_generated(name: &'static str) -> DiffCase {
     }
 }
 
-/// `change generated constraint`: `gen_name`'s STORED expression changes. drizzle
-/// drops and re-adds the column with the new expression.
+/// `change generated constraint`: `gen_name`'s STORED expression changes. The
+/// column is dropped and re-added with the new expression.
 fn change_generated(name: &'static str) -> DiffCase {
     DiffCase {
         name,

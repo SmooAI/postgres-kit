@@ -1,16 +1,14 @@
 //! Corpus category: `columns`.
 //!
-//! Ported faithfully from drizzle-kit's `tests/pg-columns.test.ts`. Each upstream
-//! `test(...)` becomes one [`DiffCase`]: `schema1` -> [`DiffCase::from`], `schema2`
-//! -> [`DiffCase::to`], the `renames[]` argument copied verbatim into
-//! [`DiffCase::renames`], and the asserted `sqlStatements` array copied verbatim
-//! into [`DiffCase::expected_sql`].
+//! A conformance corpus of column schema-diff scenarios. Each scenario becomes one
+//! [`DiffCase`]: the two schemas map to [`DiffCase::from`] / [`DiffCase::to`], the
+//! rename hints into [`DiffCase::renames`], and the asserted statement output into
+//! [`DiffCase::expected_sql`].
 //!
-//! Most upstream tests in this file assert only the structured `statements`
-//! encoding (never the rendered `sqlStatements`), so they are recorded as
-//! [`Status::Skip`] with reason `"statements-only encoding"` — the schemas are
-//! still translated faithfully so the differ agent can promote them later by
-//! supplying the expected SQL.
+//! Some scenarios in this file assert only a structured statement encoding (never
+//! the rendered SQL), so they are recorded as [`Status::Skip`] with reason
+//! `"statements-only encoding"` — the schemas are still translated faithfully so
+//! the differ agent can promote them later by supplying the expected SQL.
 
 use postgres_kit::differ::ir::{
     SchemaSnapshot, SnapColumn, SnapCompositePk, SnapForeignKey, SnapTable,

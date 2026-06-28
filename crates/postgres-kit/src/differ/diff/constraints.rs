@@ -1,7 +1,7 @@
 //! Table-level constraint pass for tables present on both sides: CHECK, UNIQUE,
-//! and composite PRIMARY KEY constraints. Drizzle has no in-place alter for these,
+//! and composite PRIMARY KEY constraints. There is no in-place alter for these,
 //! so a changed constraint is dropped and re-added (all drops precede all adds via
-//! the [`super::order`] phases). Renames are surfaced by drizzle as drop+add too,
+//! the [`super::order`] phases). Renames are surfaced as drop+add too,
 //! so there is no rename branch here.
 
 use crate::differ::ir::SnapTable;

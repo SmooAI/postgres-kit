@@ -1,11 +1,10 @@
 //! Corpus category: `roles`.
 //!
-//! Ported verbatim from drizzle-kit's `tests/rls/pg-role.test.ts`. Each case
-//! translates `schema1` → [`DiffCase::from`] and `schema2` → [`DiffCase::to`] as
-//! [`SchemaSnapshot`] literals, copies the `renames` hints verbatim, and copies
-//! the asserted `sqlStatements` array into `expected_sql`.
+//! A conformance corpus of role schema-diff scenarios. Each case
+//! maps `from`/`to` schemas as [`SchemaSnapshot`] literals, the `renames` hints,
+//! and the asserted statement array into `expected_sql`.
 //!
-//! Role defaults (drizzle `pgRole(name)`): `createDb: false`, `createRole: false`,
+//! Role defaults (a bare role): `createDb: false`, `createRole: false`,
 //! `inherit: true` — which match [`SnapRole`]'s defaults.
 
 use postgres_kit::differ::ir::*;

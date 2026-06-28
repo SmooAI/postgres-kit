@@ -1,22 +1,19 @@
-//! Policy / RLS conformance cases, ported from drizzle-kit's
-//! `drizzle-kit/tests/rls/pg-policy.test.ts`.
+//! A conformance corpus of policy / RLS schema-diff scenarios.
 //!
-//! Each drizzle `test(...)` calls `diffTestSchemas(schema1, schema2, renames)`
-//! and asserts a `sqlStatements` array. We translate `schema1 -> from`,
-//! `schema2 -> to` as [`SchemaSnapshot`] literals, copy `renames` verbatim, and
-//! copy the asserted `sqlStatements` into `expected_sql`.
+//! Each scenario diffs `schema1 -> from`, `schema2 -> to` as [`SchemaSnapshot`]
+//! literals, with rename hints, and asserts a statement array in `expected_sql`.
 //!
 //! Mechanical translation notes:
-//! - `pgPolicy('n', { as: 'permissive' })` -> `SnapPolicy::new("n").as_permissiveness(PolicyAs::Permissive)`
+//! - a policy `{ as: 'permissive' }` -> `SnapPolicy::new("n").as_permissiveness(PolicyAs::Permissive)`
 //! - `for: 'delete'` -> `.for_command(PolicyFor::Delete)`; `to: 'current_role'` -> `.to_roles(["current_role"])`
-//! - `using: sql`true`` -> `.using("true")`; `withCheck: sql`true`` -> `.with_check("true")`
-//! - drizzle implicitly emits `ENABLE ROW LEVEL SECURITY` for any table that has
+//! - `using: 'true'` -> `.using("true")`; `withCheck: 'true'` -> `.with_check("true")`
+//! - `ENABLE ROW LEVEL SECURITY` is implicitly emitted for any table that has
 //!   a policy, so a table carrying >=1 policy is rendered with `.enable_rls()`.
-//! - `pgRole('manager').existing()` is referenced by name only (`"manager"`); an
-//!   `.existing()` role is never `CREATE`d, so it is not added to the snapshot.
+//! - an existing (unmanaged) role is referenced by name only (`"manager"`); an
+//!   existing role is never `CREATE`d, so it is not added to the snapshot.
 //!
-//! Independent (schema-level) policies: drizzle's `.link(<table not in the schema
-//! object>)` produces *individual* policies (`create_ind_policy` /
+//! Independent (schema-level) policies: a policy linked to a table not in the
+//! schema object produces *individual* policies (`create_ind_policy` /
 //! `drop_ind_policy` / `alter_ind_policy` / `rename_ind_policy`) whose SQL targets
 //! a fully-qualified `"schema"."table"` that is otherwise absent from the schema.
 //! These live in [`SchemaSnapshot::ind_policies`] (built via `.ind_policy(...)`),
@@ -477,8 +474,8 @@ pub fn cases() -> Vec<DiffCase> {
             status: Status::Supported,
         },
         DiffCase {
-            // Two new policies created in one diff; drizzle emits them in
-            // insertion order (test1, then the linked test). The snapshot keys
+            // Two new policies created in one diff; the expected output emits them
+            // in insertion order (test1, then the linked test). The snapshot keys
             // policies in a BTreeMap, so they iterate name-sorted (test, test1),
             // which inverts the expected statement order.
             name: "add policy in table and with link table",

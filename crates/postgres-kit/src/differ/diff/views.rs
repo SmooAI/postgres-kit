@@ -11,7 +11,7 @@
 //!   and access method (`SET ACCESS METHOD ...`, dropping to `heap`) are diffed
 //!   in place, after any `SET SCHEMA` / `RENAME TO`.
 //!
-//! The drizzle `.existing()` flag (a reference to a view the kit does not manage)
+//! The "existing" flag (a reference to a view the kit does not manage)
 //! is honored: a view that is `existing` in `to` never produces any view DDL
 //! (creation/rename/move/option alters are all suppressed) — though a schema it
 //! moves into is still created by the [`super::schemas`] pass. An `existing` view
@@ -184,8 +184,8 @@ fn alter_in_place(
     to_v: &SnapView,
 ) {
     // Options: keys present-and-changed or newly added -> SET; keys removed ->
-    // RESET. BTreeMap iteration keeps both lists deterministically sorted, which
-    // matches drizzle's alphabetical option order.
+    // RESET. BTreeMap iteration keeps both lists deterministically sorted, for a
+    // stable alphabetical option order.
     let mut set: Vec<(String, String)> = Vec::new();
     let mut reset: Vec<String> = Vec::new();
     for (k, v) in &to_v.with_options {

@@ -1,10 +1,9 @@
 //! Corpus category: `checks` — CHECK constraint diffing.
 //!
-//! Ported verbatim from drizzle-kit's `tests/pg-checks.test.ts`. Each
-//! [`DiffCase`] mirrors one `test(...)` block: `from`/`to` are the two
-//! `diffTestSchemas` schemas translated into [`SchemaSnapshot`] literals,
-//! `renames` is copied verbatim, and `expected_sql` is the asserted
-//! `sqlStatements` array copied verbatim.
+//! A conformance corpus of CHECK-constraint schema-diff scenarios. Each
+//! [`DiffCase`] is one scenario: `from`/`to` are the two schemas translated into
+//! [`SchemaSnapshot`] literals, `renames` lists the rename hints, and
+//! `expected_sql` is the asserted statement output.
 
 use super::{DiffCase, Status};
 use postgres_kit::differ::ir::*;

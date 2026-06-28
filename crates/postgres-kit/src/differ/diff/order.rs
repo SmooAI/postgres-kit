@@ -2,7 +2,7 @@
 //! pass appends to the bucket for its statement kind, iterating the (already
 //! deterministic, `BTreeMap`-keyed) snapshot so within-bucket order is stable.
 //! [`Plan::assemble`] then concatenates the buckets in a single fixed phase order
-//! that reproduces drizzle-kit's `sqlStatements` sequence:
+//! that yields a safe, dependency-respecting statement sequence:
 //!
 //! create schemas → create types → enum moves/renames/recreate/add-values →
 //! sequences → roles → disable RLS → drop policies → drop dependents
