@@ -539,7 +539,7 @@ pub fn cases() -> Vec<DiffCase> {
             expected_sql: &[
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum\" USING \"column\"::\"public\".\"enum\";",
             ],
-            status: Status::Skip("column data-type change — columns category"),
+            status: Status::Supported,
         },
         // change data type from standart type to enum. column has default.
         DiffCase {
@@ -551,7 +551,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DEFAULT 'value3'::\"public\".\"enum\";",
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum\" USING \"column\"::\"public\".\"enum\";",
             ],
-            status: Status::Skip("column data-type change with default — columns category"),
+            status: Status::Supported,
         },
         // change data type from array standart type to array enum. column has default.
         DiffCase {
@@ -563,7 +563,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DEFAULT '{\"value3\"}'::\"public\".\"enum\"[];",
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum\"[] USING \"column\"::\"public\".\"enum\"[];",
             ],
-            status: Status::Skip("array column data-type change with default — columns category"),
+            status: Status::Supported,
         },
         // change data type from array standart type to array enum. column without default.
         DiffCase {
@@ -574,7 +574,7 @@ pub fn cases() -> Vec<DiffCase> {
             expected_sql: &[
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum\"[] USING \"column\"::\"public\".\"enum\"[];",
             ],
-            status: Status::Skip("array column data-type change — columns category"),
+            status: Status::Supported,
         },
         // change data type from array standart type with custom size to array enum with custom size. column has default.
         DiffCase {
@@ -586,7 +586,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DEFAULT '{\"value3\"}'::\"public\".\"enum\"[3];",
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum\"[3] USING \"column\"::\"public\".\"enum\"[3];",
             ],
-            status: Status::Skip("sized-array column data-type change with default — columns category"),
+            status: Status::Supported,
         },
         // change data type from array standart type with custom size to array enum with custom size. column without default.
         DiffCase {
@@ -597,7 +597,7 @@ pub fn cases() -> Vec<DiffCase> {
             expected_sql: &[
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum\"[2] USING \"column\"::\"public\".\"enum\"[2];",
             ],
-            status: Status::Skip("sized-array column data-type change — columns category"),
+            status: Status::Supported,
         },
         // change data type from enum type to standart type.
         DiffCase {
@@ -606,7 +606,7 @@ pub fn cases() -> Vec<DiffCase> {
             to: enum_table("enum", &["value1", "value3"], "table", "column", "varchar", None),
             renames: &[],
             expected_sql: &["ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE varchar;"],
-            status: Status::Skip("column data-type change — columns category"),
+            status: Status::Supported,
         },
         // change data type from enum type to standart type. column has default.
         DiffCase {
@@ -618,7 +618,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE varchar;",
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DEFAULT 'value2';",
             ],
-            status: Status::Skip("column data-type change with default — columns category"),
+            status: Status::Supported,
         },
         // change data type from array enum type to array standart type.
         DiffCase {
@@ -627,7 +627,7 @@ pub fn cases() -> Vec<DiffCase> {
             to: enum_table("enum", &["value1", "value3"], "table", "column", "varchar[]", None),
             renames: &[],
             expected_sql: &["ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE varchar[];"],
-            status: Status::Skip("array column data-type change — columns category"),
+            status: Status::Supported,
         },
         // change data type from array enum with custom size type to array standart type with custom size.
         DiffCase {
@@ -636,7 +636,7 @@ pub fn cases() -> Vec<DiffCase> {
             to: enum_table("enum", &["value1", "value3"], "table", "column", "varchar[2]", None),
             renames: &[],
             expected_sql: &["ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE varchar[2];"],
-            status: Status::Skip("sized-array column data-type change — columns category"),
+            status: Status::Supported,
         },
         // change data type from array enum type to array standart type. column has default.
         DiffCase {
@@ -648,7 +648,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE varchar[];",
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DEFAULT '{\"value2\"}';",
             ],
-            status: Status::Skip("array column data-type change with default — columns category"),
+            status: Status::Supported,
         },
         // change data type from array enum type with custom size to array standart type with custom size. column has default.
         DiffCase {
@@ -660,7 +660,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE varchar[3];",
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DEFAULT '{\"value2\"}';",
             ],
-            status: Status::Skip("sized-array column data-type change with default — columns category"),
+            status: Status::Supported,
         },
         // change data type from standart type to standart type.
         DiffCase {
@@ -669,7 +669,7 @@ pub fn cases() -> Vec<DiffCase> {
             to: table_only("table", "column", "text", None),
             renames: &[],
             expected_sql: &["ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE text;"],
-            status: Status::Skip("column data-type change — columns category"),
+            status: Status::Supported,
         },
         // change data type from standart type to standart type. column has default.
         DiffCase {
@@ -681,7 +681,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE text;",
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DEFAULT 'value2';",
             ],
-            status: Status::Skip("column data-type change with default — columns category"),
+            status: Status::Supported,
         },
         // change data type from standart type to standart type. columns are arrays.
         DiffCase {
@@ -690,7 +690,7 @@ pub fn cases() -> Vec<DiffCase> {
             to: table_only("table", "column", "text[]", None),
             renames: &[],
             expected_sql: &["ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE text[];"],
-            status: Status::Skip("array column data-type change — columns category"),
+            status: Status::Supported,
         },
         // change data type from standart type to standart type. columns are arrays with custom sizes.
         DiffCase {
@@ -699,7 +699,7 @@ pub fn cases() -> Vec<DiffCase> {
             to: table_only("table", "column", "text[2]", None),
             renames: &[],
             expected_sql: &["ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE text[2];"],
-            status: Status::Skip("sized-array column data-type change — columns category"),
+            status: Status::Supported,
         },
         // change data type from standart type to standart type. columns are arrays. column has default.
         DiffCase {
@@ -711,7 +711,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE text[];",
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DEFAULT '{\"hello\"}';",
             ],
-            status: Status::Skip("array column data-type change with default — columns category"),
+            status: Status::Supported,
         },
         // change data type from standart type to standart type. columns are arrays with custom sizes.column has default.
         DiffCase {
@@ -723,7 +723,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE text[2];",
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DEFAULT '{\"hello\"}';",
             ],
-            status: Status::Skip("sized-array column data-type change with default — columns category"),
+            status: Status::Supported,
         },
         // change data type from one enum to other.
         DiffCase {
@@ -742,7 +742,7 @@ pub fn cases() -> Vec<DiffCase> {
             expected_sql: &[
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum2\" USING \"column\"::text::\"public\".\"enum2\";",
             ],
-            status: Status::Skip("column enum-to-enum data-type change — columns category"),
+            status: Status::Supported,
         },
         // change data type from one enum to other. column has default.
         DiffCase {
@@ -763,7 +763,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum2\" USING \"column\"::text::\"public\".\"enum2\";",
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DEFAULT 'value3';",
             ],
-            status: Status::Skip("column enum-to-enum data-type change with default — columns category"),
+            status: Status::Supported,
         },
         // change data type from one enum to other. changed defaults.
         DiffCase {
@@ -784,7 +784,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DATA TYPE \"public\".\"enum2\" USING \"column\"::text::\"public\".\"enum2\";",
                 "ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DEFAULT 'value1';",
             ],
-            status: Status::Skip("column enum-to-enum data-type change with changed default — columns category"),
+            status: Status::Supported,
         },
         // check filtering json statements. here we have recreate enum + set new type + alter default.
         DiffCase {

@@ -17,11 +17,29 @@ pub fn diff(plan: &mut Plan, from: &SchemaSnapshot, to: &SchemaSnapshot, hints: 
     // dependent columns. Both suppress otherwise-spurious column statements.
     let recreating = enums::recreating_enums(from, to, hints);
     let renamed = enums::renamed_enums(from, to, hints);
+    // Bare enum names present on each side, plus the `to`-side schema for each so a
+    // column whose type changes to/from an enum can emit a schema-qualified
+    // `SET DATA TYPE ... USING` cast.
+    let enums_from: BTreeSet<String> = from.enums.values().map(|e| e.name.clone()).collect();
+    let enums_to: BTreeMap<String, String> = to
+        .enums
+        .values()
+        .map(|e| (e.name.clone(), e.schema.clone()))
+        .collect();
 
     for (to_key, to_t) in &to.tables {
         if let Some(from_t) = from.tables.get(to_key) {
             // Matched in place.
-            alter_existing(plan, from_t, to_t, hints, &recreating, &renamed);
+            alter_existing(
+                plan,
+                from_t,
+                to_t,
+                hints,
+                &recreating,
+                &renamed,
+                &enums_from,
+                &enums_to,
+            );
             consumed_from.insert(to_key.clone());
             continue;
         }
@@ -44,7 +62,16 @@ pub fn diff(plan: &mut Plan, from: &SchemaSnapshot, to: &SchemaSnapshot, hints: 
                         to: r.to.clone(),
                     });
                 }
-                alter_existing(plan, from_t, to_t, hints, &recreating, &renamed);
+                alter_existing(
+                    plan,
+                    from_t,
+                    to_t,
+                    hints,
+                    &recreating,
+                    &renamed,
+                    &enums_from,
+                    &enums_to,
+                );
                 consumed_from.insert(from_key);
                 continue;
             }
@@ -65,6 +92,7 @@ pub fn diff(plan: &mut Plan, from: &SchemaSnapshot, to: &SchemaSnapshot, hints: 
 
 /// Drive all sub-object diffs for a table present on both sides (post-rename the
 /// effective name is `to_t`'s).
+#[allow(clippy::too_many_arguments)]
 fn alter_existing(
     plan: &mut Plan,
     from_t: &SnapTable,
@@ -72,8 +100,19 @@ fn alter_existing(
     hints: &RenameHints,
     recreating_enums: &BTreeSet<String>,
     renamed_enums: &BTreeMap<String, String>,
+    enums_from: &BTreeSet<String>,
+    enums_to: &BTreeMap<String, String>,
 ) {
-    columns::diff(plan, from_t, to_t, hints, recreating_enums, renamed_enums);
+    columns::diff(
+        plan,
+        from_t,
+        to_t,
+        hints,
+        recreating_enums,
+        renamed_enums,
+        enums_from,
+        enums_to,
+    );
     constraints::diff(plan, from_t, to_t);
     fks::diff(plan, from_t, to_t);
     indexes::diff(plan, from_t, to_t);
