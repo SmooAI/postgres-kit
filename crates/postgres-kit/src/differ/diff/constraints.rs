@@ -71,12 +71,12 @@ pub fn diff(plan: &mut Plan, from_t: &SnapTable, to_t: &SnapTable) {
     }
 
     // ---- composite primary keys ----
-    for (name, from_pk) in &from_t.composite_primary_keys {
-        let dropped = match to_t.composite_primary_keys.get(name) {
-            None => true,
-            Some(to_pk) => to_pk != from_pk,
-        };
-        if dropped {
+    // A composite PK that vanished is a straight drop. A *changed* PK that keeps
+    // its name is a single combined drop+recreate (`AlterCompositePk`) — Postgres
+    // has no in-place PK alter, and the corpus expects the two halves joined into
+    // one breakpoint-delimited statement rather than split across phases.
+    for name in from_t.composite_primary_keys.keys() {
+        if !to_t.composite_primary_keys.contains_key(name) {
             plan.drop_composite_pks.push(DdlStatement::DropCompositePk {
                 schema: schema.clone(),
                 table: table.clone(),
@@ -85,17 +85,23 @@ pub fn diff(plan: &mut Plan, from_t: &SnapTable, to_t: &SnapTable) {
         }
     }
     for (name, to_pk) in &to_t.composite_primary_keys {
-        let added = match from_t.composite_primary_keys.get(name) {
-            None => true,
-            Some(from_pk) => from_pk != to_pk,
-        };
-        if added {
-            plan.add_composite_pks
+        match from_t.composite_primary_keys.get(name) {
+            None => plan
+                .add_composite_pks
                 .push(DdlStatement::CreateCompositePk {
                     schema: schema.clone(),
                     table: table.clone(),
                     pk: to_pk.clone(),
-                });
+                }),
+            Some(from_pk) if from_pk != to_pk => {
+                plan.alter_composite_pks
+                    .push(DdlStatement::AlterCompositePk {
+                        schema: schema.clone(),
+                        table: table.clone(),
+                        pk: to_pk.clone(),
+                    });
+            }
+            Some(_) => {}
         }
     }
 }

@@ -275,6 +275,13 @@ pub enum DdlStatement {
         table: String,
         name: String,
     },
+    /// Drop then recreate a same-named composite PK (Postgres has no in-place PK
+    /// alter). Rendered as one breakpoint-delimited statement.
+    AlterCompositePk {
+        schema: String,
+        table: String,
+        pk: SnapCompositePk,
+    },
 
     // ---- foreign keys ----
     CreateForeignKey {
@@ -741,6 +748,15 @@ impl DdlStatement {
                 qualify_table(schema, table),
                 quote_identifier(name)
             ),
+            DdlStatement::AlterCompositePk { schema, table, pk } => {
+                let t = qualify_table(schema, table);
+                format!(
+                    "ALTER TABLE {t} DROP CONSTRAINT {};\n--> statement-breakpoint\nALTER TABLE {t} ADD CONSTRAINT {} PRIMARY KEY({});",
+                    quote_identifier(&pk.name),
+                    quote_identifier(&pk.name),
+                    quote_cols_tight(&pk.columns)
+                )
+            }
 
             DdlStatement::CreateForeignKey { schema, table, fk } => format!(
                 "ALTER TABLE {} ADD CONSTRAINT {} {};",

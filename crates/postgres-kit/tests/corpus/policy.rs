@@ -475,9 +475,9 @@ pub fn cases() -> Vec<DiffCase> {
         },
         DiffCase {
             // Two new policies created in one diff; the expected output emits them
-            // in insertion order (test1, then the linked test). The snapshot keys
-            // policies in a BTreeMap, so they iterate name-sorted (test, test1),
-            // which inverts the expected statement order.
+            // in insertion order (test1, then the linked test). The differ now
+            // tracks declaration order (`SnapPolicy::position`) and emits policies
+            // in author order rather than the BTreeMap's name-sort.
             name: "add policy in table and with link table",
             from: snap(tbl("users")),
             to: snap(
@@ -492,9 +492,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "CREATE POLICY \"test1\" ON \"users\" AS PERMISSIVE FOR ALL TO current_user;",
                 "CREATE POLICY \"test\" ON \"users\" AS PERMISSIVE FOR ALL TO public;",
             ],
-            status: Status::Skip(
-                "multi-policy creation emits in insertion order (test1, test); BTreeMap iterates name-sorted (test, test1)",
-            ),
+            status: Status::Supported,
         },
         // ---- linked policies on a NON-schema table (ind_policy) ----
         DiffCase {

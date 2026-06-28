@@ -34,15 +34,18 @@ pub fn diff(plan: &mut Plan, from_t: &SnapTable, to_t: &SnapTable) {
 
     // Adds (new name) and alters (same name, changed definition). Both ride the
     // build-phase `add_foreign_keys` bucket so they land after columns exist; the
-    // alter is a single combined drop+recreate statement.
-    for (name, to_fk) in &to_t.foreign_keys {
+    // alter is a single combined drop+recreate statement. Iterate in declaration
+    // order (not the `BTreeMap`'s name-sort) so multiple new FKs emit in author
+    // order.
+    for to_fk in to_t.foreign_keys_ordered() {
+        let name = &to_fk.name;
         match from_t.foreign_keys.get(name) {
             None => plan.add_foreign_keys.push(DdlStatement::CreateForeignKey {
                 schema: schema.clone(),
                 table: table.clone(),
                 fk: to_fk.clone(),
             }),
-            Some(from_fk) if from_fk != to_fk => {
+            Some(from_fk) if !from_fk.same_definition(to_fk) => {
                 plan.add_foreign_keys.push(DdlStatement::AlterForeignKey {
                     schema: schema.clone(),
                     table: table.clone(),

@@ -53,8 +53,10 @@ pub fn diff(plan: &mut Plan, from_t: &SnapTable, to_t: &SnapTable, hints: &Renam
         }
     }
 
-    // Created / altered / recreated.
-    for (name, to_p) in &to_t.policies {
+    // Created / altered / recreated. Iterate in declaration order (not the
+    // `BTreeMap`'s name-sort) so multiple new policies emit in author order.
+    for to_p in to_t.policies_ordered() {
+        let name = &to_p.name;
         if to_consumed.contains(name) {
             continue;
         }

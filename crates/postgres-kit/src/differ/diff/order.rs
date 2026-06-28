@@ -63,6 +63,7 @@ pub struct Plan {
     pub add_checks: Vec<DdlStatement>,
     pub add_uniques: Vec<DdlStatement>,
     pub add_composite_pks: Vec<DdlStatement>,
+    pub alter_composite_pks: Vec<DdlStatement>,
     pub add_foreign_keys: Vec<DdlStatement>,
     pub create_indexes: Vec<DdlStatement>,
 
@@ -95,7 +96,7 @@ pub struct Plan {
 impl Plan {
     /// Concatenate every bucket in the fixed phase order.
     pub fn assemble(self) -> Vec<DdlStatement> {
-        let buckets: [Vec<DdlStatement>; 44] = [
+        let buckets: [Vec<DdlStatement>; 45] = [
             self.create_schemas,
             self.create_enums,
             self.enum_set_schema,
@@ -130,6 +131,7 @@ impl Plan {
             self.add_checks,
             self.add_uniques,
             self.add_composite_pks,
+            self.alter_composite_pks,
             self.add_foreign_keys,
             self.create_indexes,
             self.raw_sql,

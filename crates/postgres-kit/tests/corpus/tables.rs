@@ -414,9 +414,7 @@ pub fn cases() -> Vec<DiffCase> {
             expected_sql: &[
                 "ALTER TABLE \"table\" DROP CONSTRAINT \"table_pk\";\n--> statement-breakpoint\nALTER TABLE \"table\" ADD CONSTRAINT \"table_pk\" PRIMARY KEY(\"col2\",\"col3\");",
             ],
-            status: Status::Skip(
-                "expected output joins DROP+ADD PK into one breakpoint-delimited string; differ emits separate statements",
-            ),
+            status: Status::Supported,
         },
         // ---- add index with op ----
         DiffCase {
@@ -511,9 +509,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "CREATE UNIQUE INDEX \"t1_uni_idx\" ON \"t1\" USING btree (\"t1_uni_idx\");",
                 "CREATE INDEX \"t1_idx\" ON \"t1\" USING btree (\"t1_idx\") WHERE \"t1\".\"t1_idx\" > 0;",
             ],
-            status: Status::Skip(
-                "multi-table create: FKs/indexes emitted after all tables; FK ordering is declaration-order vs BTreeMap-sorted — defer to differ promotion",
-            ),
+            status: Status::Supported,
         },
         // ---- optional db aliases (camel case) ----
         DiffCase {
@@ -575,9 +571,7 @@ pub fn cases() -> Vec<DiffCase> {
                 "CREATE UNIQUE INDEX \"t1UniIdx\" ON \"t1\" USING btree (\"t1UniIdx\");",
                 "CREATE INDEX \"t1Idx\" ON \"t1\" USING btree (\"t1Idx\") WHERE \"t1\".\"t1Idx\" > 0;",
             ],
-            status: Status::Skip(
-                "multi-table create: FKs/indexes emitted after all tables; FK ordering is declaration-order vs BTreeMap-sorted — defer to differ promotion",
-            ),
+            status: Status::Supported,
         },
         // ---- alter foreign key: add ON DELETE cascade ----
         // Postgres has no in-place FK alter, so a changed referential action is a

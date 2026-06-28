@@ -29,7 +29,7 @@ pub fn diff(plan: &mut Plan, from_t: &SnapTable, to_t: &SnapTable) {
             None => true,
             // Present on both sides but different — drop the old definition so
             // the recreate below can lay down the new one.
-            Some(to_i) => to_i != from_i,
+            Some(to_i) => !to_i.same_definition(from_i),
         };
         if removed_or_changed {
             plan.drop_indexes.push(DdlStatement::DropIndex {
@@ -40,13 +40,16 @@ pub fn diff(plan: &mut Plan, from_t: &SnapTable, to_t: &SnapTable) {
     }
 
     // Creates, plus the create half of every alter: both go in the index-build
-    // phase, which the plan assembles after the matching drops.
-    for (name, to_i) in &to_t.indexes {
+    // phase, which the plan assembles after the matching drops. Iterate in
+    // declaration order (not the `BTreeMap`'s name-sort) so multiple new indexes
+    // emit in author order.
+    for to_i in to_t.indexes_ordered() {
+        let name = &to_i.name;
         let added_or_changed = match from_t.indexes.get(name) {
             // Brand new in `to`.
             None => true,
             // Changed — recreate with the new definition.
-            Some(from_i) => from_i != to_i,
+            Some(from_i) => !from_i.same_definition(to_i),
         };
         if added_or_changed {
             plan.create_indexes.push(DdlStatement::CreateIndex {

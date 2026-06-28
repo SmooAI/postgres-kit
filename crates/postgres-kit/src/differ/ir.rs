@@ -201,7 +201,8 @@ impl SnapTable {
         self
     }
 
-    pub fn foreign_key(mut self, fk: SnapForeignKey) -> Self {
+    pub fn foreign_key(mut self, mut fk: SnapForeignKey) -> Self {
+        fk.position = self.foreign_keys.len() as u32;
         self.foreign_keys.insert(fk.name.clone(), fk);
         self
     }
@@ -216,7 +217,8 @@ impl SnapTable {
         self
     }
 
-    pub fn index(mut self, idx: SnapIndex) -> Self {
+    pub fn index(mut self, mut idx: SnapIndex) -> Self {
+        idx.position = self.indexes.len() as u32;
         self.indexes.insert(idx.name.clone(), idx);
         self
     }
@@ -226,9 +228,45 @@ impl SnapTable {
         self
     }
 
-    pub fn policy(mut self, policy: SnapPolicy) -> Self {
+    pub fn policy(mut self, mut policy: SnapPolicy) -> Self {
+        policy.position = self.policies.len() as u32;
         self.policies.insert(policy.name.clone(), policy);
         self
+    }
+
+    /// Foreign keys in declaration order (the `foreign_keys` map is a `BTreeMap`,
+    /// which would otherwise iterate name-sorted). Used by emission so a
+    /// multi-FK `CREATE TABLE` lays its constraints down in author order.
+    pub fn foreign_keys_ordered(&self) -> Vec<&SnapForeignKey> {
+        let mut v: Vec<&SnapForeignKey> = self.foreign_keys.values().collect();
+        v.sort_by(|a, b| {
+            a.position
+                .cmp(&b.position)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        v
+    }
+
+    /// Indexes in declaration order (see [`Self::foreign_keys_ordered`]).
+    pub fn indexes_ordered(&self) -> Vec<&SnapIndex> {
+        let mut v: Vec<&SnapIndex> = self.indexes.values().collect();
+        v.sort_by(|a, b| {
+            a.position
+                .cmp(&b.position)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        v
+    }
+
+    /// Policies in declaration order (see [`Self::foreign_keys_ordered`]).
+    pub fn policies_ordered(&self) -> Vec<&SnapPolicy> {
+        let mut v: Vec<&SnapPolicy> = self.policies.values().collect();
+        v.sort_by(|a, b| {
+            a.position
+                .cmp(&b.position)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        v
     }
 
     pub fn rls(mut self, enabled: bool) -> Self {
@@ -375,6 +413,11 @@ pub struct SnapForeignKey {
     pub columns_to: Vec<String>,
     pub on_update: Option<String>,
     pub on_delete: Option<String>,
+    /// Declaration order within the owning table (assigned by
+    /// [`SnapTable::foreign_key`]). Not part of the FK's logical identity — the
+    /// differ uses [`Self::same_definition`] for change detection so a reorder
+    /// alone never emits DDL.
+    pub position: u32,
 }
 
 impl SnapForeignKey {
@@ -391,7 +434,18 @@ impl SnapForeignKey {
             columns_to: columns_to.into_iter().map(Into::into).collect(),
             on_update: None,
             on_delete: None,
+            position: 0,
         }
+    }
+
+    /// Whether two FKs are logically identical, ignoring declaration `position`.
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.columns_from == other.columns_from
+            && self.table_to == other.table_to
+            && self.columns_to == other.columns_to
+            && self.on_update == other.on_update
+            && self.on_delete == other.on_delete
     }
 
     pub fn on_update(mut self, action: impl Into<String>) -> Self {
@@ -521,6 +575,11 @@ pub struct SnapIndex {
     pub unique: bool,
     pub method: String,
     pub where_clause: Option<String>,
+    /// Declaration order within the owning table (assigned by
+    /// [`SnapTable::index`]). Not part of the index's logical identity — the
+    /// differ uses [`Self::same_definition`] for change detection so a reorder
+    /// alone never emits DDL.
+    pub position: u32,
 }
 
 impl SnapIndex {
@@ -534,7 +593,18 @@ impl SnapIndex {
             unique: false,
             method: "btree".into(),
             where_clause: None,
+            position: 0,
         }
+    }
+
+    /// Whether two indexes are logically identical, ignoring declaration
+    /// `position`.
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.columns == other.columns
+            && self.unique == other.unique
+            && self.method == other.method
+            && self.where_clause == other.where_clause
     }
 
     pub fn unique(mut self) -> Self {
@@ -562,6 +632,11 @@ pub struct SnapPolicy {
     pub to: Vec<String>,
     pub using: Option<String>,
     pub with_check: Option<String>,
+    /// Declaration order within the owning table (assigned by
+    /// [`SnapTable::policy`]). Not part of the policy's logical identity — the
+    /// differ compares policies field-by-field (ignoring `position`), so a
+    /// reorder alone never emits DDL.
+    pub position: u32,
 }
 
 impl SnapPolicy {
@@ -573,6 +648,7 @@ impl SnapPolicy {
             to: Vec::new(),
             using: None,
             with_check: None,
+            position: 0,
         }
     }
 

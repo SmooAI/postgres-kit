@@ -132,21 +132,21 @@ fn create_table(plan: &mut Plan, t: &SnapTable) {
             table: t.name.clone(),
         });
     }
-    for fk in t.foreign_keys.values() {
+    for fk in t.foreign_keys_ordered() {
         plan.add_foreign_keys.push(DdlStatement::CreateForeignKey {
             schema: t.schema.clone(),
             table: t.name.clone(),
             fk: fk.clone(),
         });
     }
-    for idx in t.indexes.values() {
+    for idx in t.indexes_ordered() {
         plan.create_indexes.push(DdlStatement::CreateIndex {
             schema: t.schema.clone(),
             table: t.name.clone(),
             index: idx.clone(),
         });
     }
-    for policy in t.policies.values() {
+    for policy in t.policies_ordered() {
         plan.create_policies.push(DdlStatement::CreatePolicy {
             schema: t.schema.clone(),
             table: t.name.clone(),
@@ -157,7 +157,7 @@ fn create_table(plan: &mut Plan, t: &SnapTable) {
 
 /// Drop a table: its policies first (CASCADE on the table handles the rest).
 fn drop_table(plan: &mut Plan, t: &SnapTable) {
-    for policy in t.policies.values() {
+    for policy in t.policies_ordered() {
         plan.drop_policies.push(DdlStatement::DropPolicy {
             schema: t.schema.clone(),
             table: t.name.clone(),
