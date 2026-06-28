@@ -273,7 +273,9 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ADD COLUMN \"col1\" \"my_enum\";",
                 "ALTER TABLE \"table\" ADD COLUMN \"col2\" integer;",
             ],
-            status: Status::Skip("column add — columns category"),
+            status: Status::Skip(
+                "follow-up: ADD COLUMN does not quote enum type names (emits bare my_enum)",
+            ),
         },
         // enums #21 — add array columns (enum array + integer array) to a table.
         DiffCase {
@@ -296,7 +298,9 @@ pub fn cases() -> Vec<DiffCase> {
                 "ALTER TABLE \"table\" ADD COLUMN \"col1\" \"my_enum\"[];",
                 "ALTER TABLE \"table\" ADD COLUMN \"col2\" integer[];",
             ],
-            status: Status::Skip("array column add — columns category"),
+            status: Status::Skip(
+                "follow-up: ADD COLUMN does not quote enum array type names (emits bare my_enum[])",
+            ),
         },
         // drop enum value — value removal recreates the type (no dependent columns).
         DiffCase {
@@ -528,7 +532,9 @@ pub fn cases() -> Vec<DiffCase> {
             to: enum_table("enum", &["value1", "value3"], "table", "column", "enum", Some("value3")),
             renames: &[],
             expected_sql: &["ALTER TABLE \"table\" ALTER COLUMN \"column\" SET DEFAULT 'value3';"],
-            status: Status::Skip("column default add — columns category"),
+            status: Status::Skip(
+                "follow-up: SET DEFAULT does not quote enum literal (emits bare value3)",
+            ),
         },
         // change data type from standart type to enum.
         DiffCase {

@@ -49,9 +49,9 @@ follows [Keep a Changelog](https://keepachangelog.com/); the project adheres to
   rename detection vs. drop+add). Covers tables, columns, checks, enums, generated
   & identity columns, RLS policies, roles, sequences, and views.
 - **Differ conformance corpus** (`tests/differ_corpus.rs`): a conformance corpus
-  of Postgres schema-diff scenarios — 258 cases, 198 asserted
-  (snapshot-in → expected-DDL-out under normalized comparison), 60 tracked as
-  `Skip` for features outside the snapshot IR (see ROADMAP follow-ups).
+  of Postgres schema-diff scenarios — 258 cases, 249 asserted
+  (snapshot-in → expected-DDL-out under normalized comparison), 9 tracked as
+  `Skip` for behaviour outside the snapshot IR (see ROADMAP follow-ups).
 - **Deferred-corpus promotion** (phase 2): the previously-`Skip`'d differ
   categories are now asserted end-to-end —
     - **Views**: `WITH (...)` storage options, materialized-view `TABLESPACE`,
@@ -75,6 +75,12 @@ follows [Keep a Changelog](https://keepachangelog.com/); the project adheres to
       `SchemaSnapshotBuilder::ind_policy`, `DdlStatement::{Create,Drop,Alter,Rename}IndPolicy`,
       an `ind_policy:` rename-hint tag, and dedicated `Plan` buckets ordered
       alongside their table-policy counterparts.
+- **Deferred-corpus promotion** (phase 3): the `tables` and `columns` categories
+  are now asserted end-to-end against rendered SQL (26 cases flipped
+  `Skip` → `Supported`) — `CREATE`/`DROP TABLE`, `ALTER TABLE … RENAME`,
+  `ALTER TABLE … SET SCHEMA`, multi-table creates, composite-PK add/rename
+  (breakpoint-delimited DROP+ADD), `ADD COLUMN`, `RENAME COLUMN`, and column-level
+  composite-PK changes. The corpus is now 249 asserted / 9 `Skip`.
 - **Migrations** (`feature = "migrate"`): forward-only `run_migrations` over a
   `*.sql` directory with a `__pg_migrations` bookkeeping table (idempotent re-runs),
   `split_sql_statements` (`--> statement-breakpoint` aware), and
@@ -106,18 +112,17 @@ follows [Keep a Changelog](https://keepachangelog.com/); the project adheres to
   and the journal types `MigrationJournal` / `MigrationJournalEntry`. The on-disk
   layout is unchanged (`meta/_journal.json`, `--> statement-breakpoint` markers).
 
-### Follow-ups (tracked as corpus `Skip`s, deferred to later phases)
+### Follow-ups (the remaining 9 corpus `Skip`s, in 3 clusters)
 
-- **Columns category** (the bulk of the remaining `Skip`s): column add / default
-  add / data-type change cases — including every enum↔standard and enum↔enum
-  data-type-change variant — are deferred to a dedicated columns-promotion pass.
-- Multi-construct **ordering** mismatches vs. the corpus's insertion order:
-  FK/index emission for multi-table creates (declaration order vs.
-  `BTreeMap`-sorted), composite-PK DROP+ADD joined into one breakpoint-delimited
-  string, and multi-policy creation order (BTreeMap name-sorted vs. insertion order).
-- **Tables/schema** "statements-only encoding" goldens (add/drop/move table,
-  multiproject schema) whose corpus scenarios assert the structured statement
-  encoding only, not rendered SQL.
-- Enum **schema rename** (`ALTER SCHEMA`) — schemas are not modeled as renameable
-  IR entities.
-- Error-case fixtures (duplicate view / constraint names that Postgres rejects).
+- **Schema-level renames** (`ALTER SCHEMA … RENAME TO`) — 3 cases (`change schema
+  with tables #1`, `change table schema #6`, `enums #5`). Schemas are not modeled
+  as renameable IR entities, so a schema rename degrades to a data-losing
+  drop+create; we deliberately do not bless that as supported output.
+- **Enum quoting in column ops** — 3 cases (`enums #20`, `enums #21`, `column is
+  enum type … add default`). `ADD COLUMN` emits a bare enum type name
+  (`my_enum` / `my_enum[]`) instead of the quoted `"my_enum"`, and `SET DEFAULT`
+  emits a bare enum literal (`value3`) instead of `'value3'`. Needs the lowering
+  to resolve user-defined types/defaults against the enum registry.
+- **Error-case fixtures** — 3 cases (`create checks with same names`, plus the
+  duplicate view / materialized-view name cases). Postgres rejects these; the
+  differ does not yet model rejection, so there is no SQL contract to assert.

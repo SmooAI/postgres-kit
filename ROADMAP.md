@@ -26,13 +26,18 @@ public crate carries no SmooAI specifics.
   enums, RLS policies, roles, sequences, and views. _Cargo feature: `differ`
   (default)._
 - ✅ Conformance corpus of Postgres schema-diff scenarios
-  (snapshot-in → expected-DDL-out): **258 cases, 198 asserted, 60
-  tracked `Skip`** (deferred categories below).
+  (snapshot-in → expected-DDL-out): **258 cases, 249 asserted, 9
+  tracked `Skip`** (remaining clusters below).
 - ✅ **Phase-2 deferred-corpus promotion**: views (`WITH` options / `TABLESPACE`
   / `USING` / `SET SCHEMA` / `.existing()` reference / DROP-before-CREATE
   recreate), enum recreate cascade, sequences, identity (custom sequence name +
   `START WITH` → `MINVALUE` fallback), FK alter (DROP+ADD), index drop
   (`public`-implicit), and independent (schema-level) policies (`SnapIndPolicy`).
+- ✅ **Phase-3 deferred-corpus promotion**: the **`tables`** and **`columns`**
+  categories now assert rendered SQL end-to-end (26 cases `Skip` → `Supported`) —
+  `CREATE`/`DROP TABLE`, `ALTER TABLE … RENAME` / `SET SCHEMA`, multi-table
+  creates, composite-PK add/rename (breakpoint-delimited DROP+ADD), `ADD COLUMN`,
+  `RENAME COLUMN`, and column-level composite-PK changes.
 - ✅ **Non-`public` schema support**: `CREATE SCHEMA` / `DROP SCHEMA` generation
   (`SchemaSnapshot.schemas`, ordered first/last), the schema-qualify fix
   (`to_create_table_sql` + all emitters share `qualify_relation`: `public`
@@ -67,23 +72,22 @@ public crate carries no SmooAI specifics.
   plus TS types + Zod (`emit_ts_module`, a `createSelectSchema` replacement) for
   polyglot consumers.
 
-## Deferred — differ corpus `Skip`s (next promotion passes)
+## Deferred — the 9 remaining differ corpus `Skip`s
 
-Tracked by the 60 remaining `Skip` cases in `tests/differ_corpus.rs`:
+Three clusters in `tests/differ_corpus.rs` (3 cases each):
 
-- **Columns category** (the largest remaining cluster): column add / default add /
-  data-type change — including every enum↔standard and enum↔enum data-type-change
-  variant — deferred to a dedicated columns-promotion pass.
-- Multi-construct **ordering** mismatches vs the corpus's insertion order:
-  multi-table-create FK/index emission (declaration order vs `BTreeMap`-sorted),
-  composite-PK DROP+ADD joined into one breakpoint-delimited string, and multi-policy
-  creation order (name-sorted vs insertion order).
-- **Tables/schema** "statements-only encoding" goldens (add/drop/move table,
-  multiproject schema) whose scenarios assert the structured statement encoding,
-  not rendered SQL.
-- Enum **schema rename** (`ALTER SCHEMA`) — schemas not modeled as renameable IR
-  entities.
-- Error-case fixtures (duplicate view / constraint names Postgres rejects).
+- **Schema-level renames** (`ALTER SCHEMA … RENAME TO`) — schemas are not modeled
+  as renameable IR entities, so a schema rename degrades to a data-losing
+  drop+create; not blessed as supported output. (`change schema with tables #1`,
+  `change table schema #6`, `enums #5`.)
+- **Enum quoting in column ops** — `ADD COLUMN` emits a bare enum type name
+  (`my_enum` / `my_enum[]`) instead of `"my_enum"`, and `SET DEFAULT` emits a bare
+  enum literal (`value3`) instead of `'value3'`; needs the lowering to resolve
+  user-defined types/defaults against the enum registry. (`enums #20`, `enums #21`,
+  `column is enum type … add default`.)
+- **Error-case fixtures** — duplicate check-constraint / view / materialized-view
+  names that Postgres rejects; the differ does not yet model rejection, so there is
+  no SQL contract to assert.
 
 ## Non-goals (for now)
 

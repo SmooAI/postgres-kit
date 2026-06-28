@@ -5,10 +5,8 @@
 //! rename hints into [`DiffCase::renames`], and the asserted statement output into
 //! [`DiffCase::expected_sql`].
 //!
-//! Some scenarios in this file assert only a structured statement encoding (never
-//! the rendered SQL), so they are recorded as [`Status::Skip`] with reason
-//! `"statements-only encoding"` — the schemas are still translated faithfully so
-//! the differ agent can promote them later by supplying the expected SQL.
+//! Every scenario in this file asserts the rendered SQL the differ emits for the
+//! `from`/`to` pair under normalized comparison.
 
 use postgres_kit::differ::ir::{
     SchemaSnapshot, SnapColumn, SnapCompositePk, SnapForeignKey, SnapTable,
@@ -34,8 +32,8 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["ALTER TABLE \"users\" ADD COLUMN \"name\" text;"],
+            status: Status::Supported,
         },
         // ---- add columns #2 ----
         // schema1: users { id serial primaryKey }
@@ -54,8 +52,11 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "ALTER TABLE \"users\" ADD COLUMN \"email\" text;",
+                "ALTER TABLE \"users\" ADD COLUMN \"name\" text;",
+            ],
+            status: Status::Supported,
         },
         // ---- alter column change name #1 ----
         // schema1: users { id serial primaryKey, name text('name') }
@@ -77,8 +78,8 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &["public.users.name->public.users.name1"],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["ALTER TABLE \"users\" RENAME COLUMN \"name\" TO \"name1\";"],
+            status: Status::Supported,
         },
         // ---- alter column change name #2 ----
         // schema1: users { id serial primaryKey, name text('name') }
@@ -101,8 +102,11 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &["public.users.name->public.users.name1"],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "ALTER TABLE \"users\" RENAME COLUMN \"name\" TO \"name1\";",
+                "ALTER TABLE \"users\" ADD COLUMN \"email\" text;",
+            ],
+            status: Status::Supported,
         },
         // ---- alter table add composite pk ----
         // schema1: table { id1 integer, id2 integer }
@@ -145,8 +149,11 @@ pub fn cases() -> Vec<DiffCase> {
                 "public.users->public.users1",
                 "public.users1.id->public.users1.id1",
             ],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "ALTER TABLE \"users\" RENAME TO \"users1\";",
+                "ALTER TABLE \"users1\" RENAME COLUMN \"id\" TO \"id1\";",
+            ],
+            status: Status::Supported,
         },
         // ---- with composite pks #1 ----
         // schema1: users { id1, id2, pk(id1,id2 name=compositePK) }
@@ -171,8 +178,8 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["ALTER TABLE \"users\" ADD COLUMN \"text\" text;"],
+            status: Status::Supported,
         },
         // ---- with composite pks #2 ----
         // schema1: users { id1, id2 }
@@ -195,8 +202,10 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "ALTER TABLE \"users\" ADD CONSTRAINT \"compositePK\" PRIMARY KEY(\"id1\",\"id2\");",
+            ],
+            status: Status::Supported,
         },
         // ---- with composite pks #3 ----
         // schema1: users { id1, id2, pk(id1,id2 name=compositePK) }
@@ -220,8 +229,11 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &["public.users.id2->public.users.id3"],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "ALTER TABLE \"users\" RENAME COLUMN \"id2\" TO \"id3\";",
+                "ALTER TABLE \"users\" DROP CONSTRAINT \"compositePK\";\n--> statement-breakpoint\nALTER TABLE \"users\" ADD CONSTRAINT \"compositePK\" PRIMARY KEY(\"id1\",\"id3\");",
+            ],
+            status: Status::Supported,
         },
         // ---- add multiple constraints #1 ----
         // Adds onDelete actions to three FKs across three referenced tables.

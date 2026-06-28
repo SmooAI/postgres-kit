@@ -4,10 +4,10 @@
 //! rename hints into `renames`, and the asserted statement output into
 //! `expected_sql`.
 //!
-//! Scenarios that assert ONLY the structured statement IR (no rendered SQL) carry
-//! no SQL contract, so they are `Skip("statements-only encoding")` — their
-//! `from`/`to` snapshots are still authored faithfully so the differ agent can
-//! promote them.
+//! The only remaining `Skip` cases are schema-level renames (`ALTER SCHEMA`):
+//! schemas are not modeled as renameable IR entities, so the differ emits a
+//! data-losing drop+create instead of a rename, which we do not bless as
+//! supported output.
 
 use postgres_kit::differ::ir::*;
 
@@ -28,8 +28,8 @@ pub fn cases() -> Vec<DiffCase> {
                 .table(SnapTable::new("users"))
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["CREATE TABLE \"users\" (\n\t\n);\n"],
+            status: Status::Supported,
         },
         // ---- add table #2 ----
         DiffCase {
@@ -42,8 +42,8 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["CREATE TABLE \"users\" (\n\t\"id\" serial PRIMARY KEY NOT NULL\n);\n"],
+            status: Status::Supported,
         },
         // ---- add table #3 ----
         DiffCase {
@@ -57,8 +57,10 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "CREATE TABLE \"users\" (\n\t\"id\" serial NOT NULL,\n\tCONSTRAINT \"users_pk\" PRIMARY KEY(\"id\")\n);\n",
+            ],
+            status: Status::Supported,
         },
         // ---- add table #4 ----
         DiffCase {
@@ -69,8 +71,11 @@ pub fn cases() -> Vec<DiffCase> {
                 .table(SnapTable::new("posts"))
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "CREATE TABLE \"posts\" (\n\t\n);\n",
+                "CREATE TABLE \"users\" (\n\t\n);\n",
+            ],
+            status: Status::Supported,
         },
         // ---- add table #5 ---- (folder schema; empty schema has no snapshot form)
         DiffCase {
@@ -80,8 +85,8 @@ pub fn cases() -> Vec<DiffCase> {
                 .table(SnapTable::new("folder.users"))
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["CREATE TABLE \"folder\".\"users\" (\n\t\n);\n"],
+            status: Status::Supported,
         },
         // ---- add table #6 ----
         DiffCase {
@@ -93,8 +98,11 @@ pub fn cases() -> Vec<DiffCase> {
                 .table(SnapTable::new("users2"))
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "DROP TABLE \"users1\" CASCADE;",
+                "CREATE TABLE \"users2\" (\n\t\n);\n",
+            ],
+            status: Status::Supported,
         },
         // ---- add table #7 ----
         DiffCase {
@@ -107,8 +115,11 @@ pub fn cases() -> Vec<DiffCase> {
                 .table(SnapTable::new("users2"))
                 .build(),
             renames: &["public.users1->public.users2"],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "CREATE TABLE \"users\" (\n\t\n);\n",
+                "ALTER TABLE \"users1\" RENAME TO \"users2\";",
+            ],
+            status: Status::Supported,
         },
         // ---- add table #8: geometry types ----
         DiffCase {
@@ -138,8 +149,10 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "CREATE TABLE \"prefix_users\" (\n\t\"id\" serial PRIMARY KEY NOT NULL\n);\n",
+            ],
+            status: Status::Supported,
         },
         // ---- multiproject schema drop table #1 ----
         DiffCase {
@@ -152,8 +165,8 @@ pub fn cases() -> Vec<DiffCase> {
                 .build(),
             to: empty(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["DROP TABLE \"prefix_users\" CASCADE;"],
+            status: Status::Supported,
         },
         // ---- multiproject schema alter table name #1 ----
         DiffCase {
@@ -171,8 +184,8 @@ pub fn cases() -> Vec<DiffCase> {
                 )
                 .build(),
             renames: &["public.prefix_users->public.prefix_users1"],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["ALTER TABLE \"prefix_users\" RENAME TO \"prefix_users1\";"],
+            status: Status::Supported,
         },
         // ---- add table #8: column with pgvector ----
         DiffCase {
@@ -199,10 +212,13 @@ pub fn cases() -> Vec<DiffCase> {
                 .table(SnapTable::new("folder.users"))
                 .build(),
             renames: &[],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["CREATE TABLE \"folder\".\"users\" (\n\t\n);\n"],
+            status: Status::Supported,
         },
         // ---- change schema with tables #1 ----
+        // Schema-level rename (`folder` -> `folder2`): schemas are not modeled as
+        // renameable IR entities, so the differ emits a data-losing drop+create
+        // rather than `ALTER SCHEMA ... RENAME TO`. Not blessed as supported.
         DiffCase {
             name: "change schema with tables #1",
             from: SchemaSnapshot::builder()
@@ -213,7 +229,9 @@ pub fn cases() -> Vec<DiffCase> {
                 .build(),
             renames: &["folder->folder2"],
             expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            status: Status::Skip(
+                "follow-up: schema rename (ALTER SCHEMA) not modeled — emits data-losing drop+create",
+            ),
         },
         // ---- change table schema #1 ----
         DiffCase {
@@ -225,8 +243,8 @@ pub fn cases() -> Vec<DiffCase> {
                 .table(SnapTable::new("folder.users"))
                 .build(),
             renames: &["public.users->folder.users"],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["ALTER TABLE \"users\" SET SCHEMA \"folder\";"],
+            status: Status::Supported,
         },
         // ---- change table schema #2 ----
         DiffCase {
@@ -238,8 +256,8 @@ pub fn cases() -> Vec<DiffCase> {
                 .table(SnapTable::new("public.users"))
                 .build(),
             renames: &["folder.users->public.users"],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["ALTER TABLE \"folder\".\"users\" SET SCHEMA \"public\";"],
+            status: Status::Supported,
         },
         // ---- change table schema #3 ----
         DiffCase {
@@ -251,8 +269,8 @@ pub fn cases() -> Vec<DiffCase> {
                 .table(SnapTable::new("folder2.users"))
                 .build(),
             renames: &["folder1.users->folder2.users"],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["ALTER TABLE \"folder1\".\"users\" SET SCHEMA \"folder2\";"],
+            status: Status::Supported,
         },
         // ---- change table schema #4 ----
         DiffCase {
@@ -264,8 +282,8 @@ pub fn cases() -> Vec<DiffCase> {
                 .table(SnapTable::new("folder2.users"))
                 .build(),
             renames: &["folder1.users->folder2.users"],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["ALTER TABLE \"folder1\".\"users\" SET SCHEMA \"folder2\";"],
+            status: Status::Supported,
         },
         // ---- change table schema #5 (move across schemas, drop old) ----
         DiffCase {
@@ -277,8 +295,8 @@ pub fn cases() -> Vec<DiffCase> {
                 .table(SnapTable::new("folder2.users"))
                 .build(),
             renames: &["folder1.users->folder2.users"],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["ALTER TABLE \"folder1\".\"users\" SET SCHEMA \"folder2\";"],
+            status: Status::Supported,
         },
         // ---- change table schema #5 (rename and move table) ----
         DiffCase {
@@ -290,10 +308,15 @@ pub fn cases() -> Vec<DiffCase> {
                 .table(SnapTable::new("folder2.users2"))
                 .build(),
             renames: &["folder1.users->folder2.users2"],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &[
+                "ALTER TABLE \"folder1\".\"users\" SET SCHEMA \"folder2\";",
+                "ALTER TABLE \"folder2\".\"users\" RENAME TO \"users2\";",
+            ],
+            status: Status::Supported,
         },
         // ---- change table schema #6 ----
+        // Mixes a schema-level rename (`folder1` -> `folder2`) with a table rename;
+        // the unmodeled schema rename degrades to a data-losing drop+create.
         DiffCase {
             name: "change table schema #6",
             from: SchemaSnapshot::builder()
@@ -304,9 +327,13 @@ pub fn cases() -> Vec<DiffCase> {
                 .build(),
             renames: &["folder1->folder2", "folder2.users->folder2.users2"],
             expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            status: Status::Skip(
+                "follow-up: schema rename (ALTER SCHEMA) not modeled — emits data-losing drop+create",
+            ),
         },
         // ---- drop table + rename schema #1 ----
+        // The target schema is empty, so the table is genuinely dropped regardless
+        // of the (unmodeled) schema rename — a plain DROP is the correct output.
         DiffCase {
             name: "drop table + rename schema #1",
             from: SchemaSnapshot::builder()
@@ -314,8 +341,8 @@ pub fn cases() -> Vec<DiffCase> {
                 .build(),
             to: empty(),
             renames: &["folder1->folder2"],
-            expected_sql: &[],
-            status: Status::Skip("statements-only encoding"),
+            expected_sql: &["DROP TABLE \"folder1\".\"users\" CASCADE;"],
+            status: Status::Supported,
         },
         // ---- create table with tsvector ----
         DiffCase {
