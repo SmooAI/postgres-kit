@@ -42,6 +42,10 @@ pub mod migrate;
 #[cfg(feature = "drift")]
 pub mod drift;
 
+/// Build a `PgTableSpec`/`EnumTypeSpec` source of truth from a live database.
+#[cfg(feature = "introspect")]
+pub mod introspect;
+
 pub use client::{LiveColumn, PgError, PgExecutor};
 #[cfg(feature = "codegen")]
 pub use codegen::{
@@ -51,6 +55,8 @@ pub use codegen::{
 pub use ddl::{create_index_sql, create_policy_sql, create_type_sql, to_create_table_sql};
 #[cfg(feature = "drift")]
 pub use drift::{canonical_pg_type, check_drift, check_enum_drift, Drift, DriftResult};
+#[cfg(feature = "introspect")]
+pub use introspect::{introspect_schema, IntrospectedSchema};
 #[cfg(feature = "migrate")]
 pub use migrate::{
     read_journal, run_migrations, split_sql_statements, MigrationJournal, MigrationJournalEntry,

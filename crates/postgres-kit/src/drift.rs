@@ -689,6 +689,9 @@ mod tests {
                 Ok(vec![])
             }
         }
+        async fn fetch_rows(&self, _sql: &str) -> Result<Vec<Vec<Option<String>>>, PgError> {
+            Ok(vec![])
+        }
         async fn fetch_columns(&self, table: &str) -> Result<Vec<LiveColumn>, PgError> {
             Ok(self.columns.get(table).cloned().unwrap_or_default())
         }

@@ -62,6 +62,30 @@ impl PgExecutor for PgPoolExec {
         }
     }
 
+    fn fetch_rows(
+        &self,
+        sql: &str,
+    ) -> impl Future<Output = Result<Vec<Vec<Option<String>>>, PgError>> + Send {
+        async move {
+            let rows = sqlx::query(sql)
+                .fetch_all(&self.0)
+                .await
+                .map_err(|e| PgError::Backend(e.to_string()))?;
+            // The kit's introspection queries cast every column to text, so each
+            // cell reads as an optional string (NULL ⇒ None).
+            rows.into_iter()
+                .map(|r| {
+                    (0..r.columns().len())
+                        .map(|i| {
+                            r.try_get::<Option<String>, _>(i)
+                                .map_err(|e| PgError::Backend(e.to_string()))
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .collect()
+        }
+    }
+
     fn fetch_columns(
         &self,
         table: &str,
@@ -73,11 +97,20 @@ impl PgExecutor for PgPoolExec {
                 Some((s, t)) => (s.to_string(), t.to_string()),
                 None => ("public".to_string(), table.to_string()),
             };
+            // `format_type` (pg_catalog) over `information_schema.columns`: the
+            // latter reports user-defined enum columns as the opaque
+            // `USER-DEFINED`, which would false-positive as drift. `format_type`
+            // yields the real type name, matching what `introspect_schema` reads.
             let rows = sqlx::query(
-                "SELECT column_name, data_type, is_nullable \
-                 FROM information_schema.columns \
-                 WHERE table_schema = $1 AND table_name = $2 \
-                 ORDER BY ordinal_position",
+                "SELECT a.attname, \
+                        format_type(a.atttypid, a.atttypmod), \
+                        (NOT a.attnotnull) \
+                 FROM pg_attribute a \
+                 JOIN pg_class c ON c.oid = a.attrelid \
+                 JOIN pg_namespace n ON n.oid = c.relnamespace \
+                 WHERE n.nspname = $1 AND c.relname = $2 \
+                   AND a.attnum > 0 AND NOT a.attisdropped \
+                 ORDER BY a.attnum",
             )
             .bind(&schema)
             .bind(&name)
@@ -87,19 +120,15 @@ impl PgExecutor for PgPoolExec {
 
             rows.into_iter()
                 .map(|r| {
-                    let name: String = r
-                        .try_get("column_name")
-                        .map_err(|e| PgError::Backend(e.to_string()))?;
-                    let data_type: String = r
-                        .try_get("data_type")
-                        .map_err(|e| PgError::Backend(e.to_string()))?;
-                    let is_nullable: String = r
-                        .try_get("is_nullable")
-                        .map_err(|e| PgError::Backend(e.to_string()))?;
+                    let name: String = r.try_get(0).map_err(|e| PgError::Backend(e.to_string()))?;
+                    let data_type: String =
+                        r.try_get(1).map_err(|e| PgError::Backend(e.to_string()))?;
+                    let is_nullable: bool =
+                        r.try_get(2).map_err(|e| PgError::Backend(e.to_string()))?;
                     Ok(LiveColumn {
                         name,
                         data_type,
-                        is_nullable: is_nullable.eq_ignore_ascii_case("YES"),
+                        is_nullable,
                     })
                 })
                 .collect()
@@ -276,4 +305,133 @@ async fn engine_roundtrips_against_live_postgres() {
     sqlx::query("RESET ROLE").execute(&mut *conn).await.ok();
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The cutover guarantee, end-to-end: stand up a representative schema (enum,
+/// two tables with a foreign key, unique / check constraints, a plain and a
+/// partial index, an RLS policy + RLS enabled, plus `tsvector` and a `STORED`
+/// generated column), then introspect it back with `introspect_schema` and feed
+/// the introspected specs to `check_drift` / `check_enum_drift` against the same
+/// database. Reading the source-of-truth out of the catalog the drift gate also
+/// reads must be drift-clean — proving introspection and drift agree.
+#[cfg(feature = "introspect")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Docker (Postgres testcontainer)"]
+async fn introspect_round_trips_drift_clean() {
+    use postgres_kit::{
+        check_enum_drift, create_index_sql, create_policy_sql, create_type_sql, introspect_schema,
+        CheckConstraintSpec, EnumTypeSpec, ForeignKeySpec, IndexColumn, IndexSpec,
+        ReferentialAction, UniqueConstraintSpec,
+    };
+    use testcontainers_modules::testcontainers::ImageExt;
+
+    // Pin a modern Postgres: introspection reads `pg_attribute.attgenerated`
+    // (PG12+) and `pg_index.indnullsnotdistinct` (PG15+), matching the Supabase
+    // (PG15+) target the cutover serves.
+    let node = Postgres::default()
+        .with_tag("16-alpine")
+        .start()
+        .await
+        .expect("start postgres container");
+    let port = node.get_host_port_ipv4(5432).await.expect("postgres port");
+    let url = format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres");
+    let pool = PgPool::connect(&url).await.expect("connect");
+    let exec = PgPoolExec(pool.clone());
+    let limits = SchemaLimits::default();
+
+    // ── Build the schema entirely from kit emitters ───────────────────────────
+    let enum_spec = EnumTypeSpec::new("widget_status", ["active", "archived"]);
+    exec.command(&create_type_sql(&enum_spec, &limits).expect("enum ddl"))
+        .await
+        .expect("create type");
+
+    let orgs =
+        PgTableSpec::new("orgs", vec![ColumnSpec::new("id", PgType::Uuid)]).primary_key(["id"]);
+    exec.command(&to_create_table_sql(&orgs, &limits).expect("orgs ddl"))
+        .await
+        .expect("create orgs");
+
+    // `widgets` exercises every introspected seam (the indexes / policy are
+    // applied separately below, as they are not inline in CREATE TABLE).
+    let widgets = PgTableSpec::new(
+        "widgets",
+        vec![
+            ColumnSpec::new("id", PgType::Uuid),
+            ColumnSpec::new("org_id", PgType::Uuid),
+            ColumnSpec::new("name", PgType::Text),
+            ColumnSpec::new("status", PgType::Enum("widget_status".into())),
+            ColumnSpec::new("body", PgType::Tsvector).nullable(),
+            ColumnSpec::new("created", PgType::Timestamptz),
+        ],
+    )
+    .primary_key(["id"])
+    .foreign_key(
+        ForeignKeySpec::new("widgets_org_fk", ["org_id"], "public.orgs", ["id"])
+            .on_delete(ReferentialAction::Cascade),
+    )
+    .unique_constraint(UniqueConstraintSpec::new("widgets_name_uq", ["name"]))
+    .check(CheckConstraintSpec::new(
+        "widgets_name_len",
+        "char_length(name) > 0",
+    ));
+    exec.command(&to_create_table_sql(&widgets, &limits).expect("widgets ddl"))
+        .await
+        .expect("create widgets");
+
+    // A plain btree index and a partial index (exercises the predicate path).
+    let idx_org = IndexSpec::new("widgets_org_idx", [IndexColumn::column("org_id")]);
+    exec.command(&create_index_sql("public", "widgets", &idx_org, &limits).expect("idx ddl"))
+        .await
+        .expect("create index");
+    let idx_partial = IndexSpec::new("widgets_named_idx", [IndexColumn::column("name")])
+        .where_clause("body IS NOT NULL");
+    exec.command(
+        &create_index_sql("public", "widgets", &idx_partial, &limits).expect("partial idx"),
+    )
+    .await
+    .expect("create partial index");
+
+    // RLS + a tenant-isolation policy.
+    exec.command("ALTER TABLE widgets ENABLE ROW LEVEL SECURITY")
+        .await
+        .expect("enable rls");
+    let policy = PolicySpec::new("widgets_org_isolation")
+        .using("org_id = current_setting('app.current_org', true)::uuid");
+    exec.command(&create_policy_sql("public", "widgets", &policy, &limits).expect("policy ddl"))
+        .await
+        .expect("create policy");
+
+    // ── Introspect the live schema back into specs ────────────────────────────
+    let introspected = introspect_schema(&exec, "public")
+        .await
+        .expect("introspect schema");
+
+    // Sanity: both tables and the enum came back.
+    assert_eq!(
+        introspected
+            .tables
+            .iter()
+            .map(|t| t.qualified_name())
+            .collect::<Vec<_>>(),
+        vec!["public.orgs".to_string(), "public.widgets".to_string()],
+    );
+    assert_eq!(introspected.enums.len(), 1);
+    assert_eq!(introspected.enums[0].name, "widget_status");
+
+    // ── The cutover guarantee: introspected specs are drift-clean ─────────────
+    let table_drift = check_drift(&exec, &introspected.tables)
+        .await
+        .expect("drift check");
+    assert!(
+        table_drift.is_clean(),
+        "introspected schema must be drift-clean, got {:?}",
+        table_drift.drift
+    );
+    let enum_drift = check_enum_drift(&exec, &introspected.enums)
+        .await
+        .expect("enum drift check");
+    assert!(
+        enum_drift.is_empty(),
+        "introspected enums must be drift-clean, got {enum_drift:?}"
+    );
 }

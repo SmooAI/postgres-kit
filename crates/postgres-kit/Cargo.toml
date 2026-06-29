@@ -39,6 +39,9 @@ codegen = []
 migrate = []
 # Read-only drift gate against a live schema (stub, src/drift.rs).
 drift = []
+# Build a PgTableSpec/EnumTypeSpec source of truth from a live database via
+# pg_catalog (src/introspect.rs) — the cutover spec-generation path.
+introspect = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

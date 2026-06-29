@@ -59,6 +59,15 @@ public crate carries no SmooAI specifics.
 - ✅ **RLS policies** — declared in the spec, emitted by `create_policy_sql`, and
   diffed by the differ; the integration test proves a generated policy blocks a
   cross-tenant read. (`feature = "rls"` reserved for future policy-only gating.)
+- ✅ **Introspection / cutover spec-generation** (`feature = "introspect"`) —
+  `introspect_schema(exec, schema)` builds the `PgTableSpec`/`EnumTypeSpec` source
+  of truth from a live DB (columns incl. `tsvector`/`vector`, defaults, generated
+  columns, PKs, FKs, unique/check constraints, indexes incl. partial predicates,
+  RLS policies + enabled flag, enum types) using the **actual** live names — via a
+  new `PgExecutor::fetch_rows` (multi-column) seam. The cutover guarantee: the
+  introspected specs are drift-clean against the same DB (`check_drift` /
+  `check_enum_drift`), so the kit can take over schema source-of-truth as a no-op.
+  An `#[ignore]` testcontainers test proves the introspect↔drift round-trip; PG15+.
 
 ## Done — the typed layers
 

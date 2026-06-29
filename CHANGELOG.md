@@ -8,6 +8,27 @@ follows [Keep a Changelog](https://keepachangelog.com/); the project adheres to
 
 ### Added
 
+- **First-class database introspection** (`feature = "introspect"`) — new
+  `introspect_schema(exec, schema) -> IntrospectedSchema { tables, enums }` builds
+  a `PgTableSpec`/`EnumTypeSpec` source of truth directly from a live database via
+  `pg_catalog`, using the **actual** live object names. It captures columns (types
+  incl. `tsvector`/`vector`, nullability, defaults, `STORED` generated columns),
+  primary keys, foreign keys (real names + `ON DELETE`/`ON UPDATE`), unique
+  constraints (incl. `NULLS NOT DISTINCT`), check constraints, indexes (incl.
+  partial-index predicates + access method), RLS policies, the RLS-enabled flag,
+  and user-defined enum types. This is the **cutover spec-generation path**: feed
+  the introspected specs straight into `check_drift` / `check_enum_drift` against
+  the same database and the result is, by construction, drift-clean — proving the
+  kit can take over schema source-of-truth as a no-op. Requires Postgres 15+
+  (reads `attgenerated`/`indnullsnotdistinct`); an `#[ignore]` testcontainers test
+  proves the introspect↔drift round-trip is clean. Promotes the proven queries
+  from the one-off cutover validator into a reusable kit feature.
+- **`PgExecutor::fetch_rows`** — new trait method returning each row as
+  text-rendered cells (`Vec<Vec<Option<String>>>`, SQL `NULL` ⇒ `None`), the
+  multi-column shape introspection needs (`fetch_strings` only yields one column
+  per row). Introspection queries cast every column to `::text`, so a driver impl
+  reads each cell as an optional string. _Breaking_: existing `PgExecutor` impls
+  must add `fetch_rows` (pre-1.0).
 - **`tsvector` / pgvector `vector` column types** — `PgType::Tsvector` (→ `tsvector`)
   and `PgType::Vector(Option<u32>)` (→ `vector` / `vector(n)`) are now first-class:
   `to_sql_type` renders them, codegen decodes them as text (Rust `String` via a

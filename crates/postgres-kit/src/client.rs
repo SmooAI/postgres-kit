@@ -39,6 +39,17 @@ pub trait PgExecutor {
     fn fetch_strings(&self, sql: &str)
         -> impl Future<Output = Result<Vec<String>, PgError>> + Send;
 
+    /// Run a query and return every row as its text-rendered cells, with SQL
+    /// `NULL` mapped to `None`. Unlike [`fetch_strings`], rows may carry multiple
+    /// columns — the shape full schema introspection needs (see
+    /// `crate::introspect`). The kit's introspection queries cast every non-text
+    /// column to `::text`, so a driver impl can read each column as an optional
+    /// string without type-aware rendering.
+    fn fetch_rows(
+        &self,
+        sql: &str,
+    ) -> impl Future<Output = Result<Vec<Vec<Option<String>>>, PgError>> + Send;
+
     /// Introspect the live columns of `table` (empty ⇒ table absent).
     fn fetch_columns(
         &self,
@@ -61,6 +72,9 @@ mod tests {
             Ok(())
         }
         async fn fetch_strings(&self, _sql: &str) -> Result<Vec<String>, PgError> {
+            Ok(vec![])
+        }
+        async fn fetch_rows(&self, _sql: &str) -> Result<Vec<Vec<Option<String>>>, PgError> {
             Ok(vec![])
         }
         async fn fetch_columns(&self, _table: &str) -> Result<Vec<LiveColumn>, PgError> {

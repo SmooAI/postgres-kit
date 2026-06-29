@@ -341,6 +341,10 @@ mod tests {
             Ok(applied)
         }
 
+        async fn fetch_rows(&self, _sql: &str) -> Result<Vec<Vec<Option<String>>>, PgError> {
+            Ok(vec![])
+        }
+
         async fn fetch_columns(&self, _table: &str) -> Result<Vec<LiveColumn>, PgError> {
             Ok(vec![])
         }
