@@ -393,7 +393,7 @@ pub async fn check_drift(
                    (SELECT string_agg(a.attname, ',' ORDER BY k.ord) \
                       FROM unnest(c.confkey) WITH ORDINALITY AS k(attnum, ord) \
                       JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.attnum) \
-                   || '|' || c.confdeltype || '|' || c.confupdtype \
+                   || '|' || c.confdeltype::text || '|' || c.confupdtype::text \
                  FROM pg_constraint c \
                  JOIN pg_class t ON c.conrelid = t.oid \
                  JOIN pg_namespace n ON t.relnamespace = n.oid \
@@ -517,10 +517,11 @@ pub async fn check_drift(
                    (SELECT string_agg(a.attname, ',' ORDER BY a.attname) \
                       FROM unnest(c.conkey) AS k(attnum) \
                       JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum) \
-                   || '|' || c.connullsnotdistinct::text \
+                   || '|' || coalesce(i.indnullsnotdistinct, false)::text \
                  FROM pg_constraint c \
                  JOIN pg_class t ON c.conrelid = t.oid \
                  JOIN pg_namespace n ON t.relnamespace = n.oid \
+                 LEFT JOIN pg_index i ON i.indexrelid = c.conindid \
                  WHERE c.contype = 'u' AND n.nspname = '{sch}' AND t.relname = '{tbl}'",
             );
             let live: BTreeSet<String> = exec
