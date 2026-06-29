@@ -11,10 +11,12 @@ migrations) for greenfield / non-Drizzle Rust.
 
 > Direction note: an earlier plan (ADR-048) made the Rust `PgTableSpec` the single
 > source of truth and had the kit own migrations. That was **walked back in
-> ADR-052** — Drizzle's TS-level richness (`$type`/relations/zod) can't be
-> reconstructed from DB introspection, and its migration DX is better. So the kit
-> is a bridge, not the source of truth. The differ/migration engine remains a
-> standalone capability, not the way this monorepo manages migrations.
+> ADR-054** — Drizzle's TS-level richness (`$type`/relations/zod) can't be
+> reconstructed from DB introspection, and its migration DX is better. In SmooAI,
+> Drizzle/Zod is ALWAYS the schema + migration source of truth (no "toolkit mode")
+> and the kit only *generates* the Rust side from it. The differ/migration engine
+> remains in the crate for external/greenfield users, but is not how SmooAI manages
+> migrations.
 
 The generic engine is vendor-neutral and gated behind cargo features so the
 public crate carries no SmooAI specifics.
