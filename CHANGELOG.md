@@ -8,6 +8,17 @@ follows [Keep a Changelog](https://keepachangelog.com/); the project adheres to
 
 ### Added
 
+- **Codegen header / doc-name overrides** (`feature = "codegen"`) —
+  `CodegenOptions::header(...)` fully replaces the leading `@generated` comment
+  block, and `CodegenOptions::source_name(...)` overrides the table name shown in
+  the row struct's doc comment (defaulting to the DB name). Both exist so a
+  consuming generator can emit bytes identical to an existing hand-rolled
+  generator's whose header/doc carry source-schema metadata a `PgTableSpec` alone
+  can't know (e.g. a Drizzle import path + camelCase export name). This makes the
+  kit a drop-in, no-op-diff replacement for such a generator. Proven by a new
+  golden test that reproduces a real committed downstream row module byte-for-byte
+  (SMOODEV-2150).
+
 - **First-class database introspection** (`feature = "introspect"`) — new
   `introspect_schema(exec, schema) -> IntrospectedSchema { tables, enums }` builds
   a `PgTableSpec`/`EnumTypeSpec` source of truth directly from a live database via
