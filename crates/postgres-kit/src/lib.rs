@@ -30,6 +30,11 @@ pub mod differ;
 #[cfg(feature = "codegen")]
 pub mod codegen;
 
+/// Spec-source codegen: emit a Rust module that reconstructs specs via the
+/// builder API (the committed schema source-of-truth path, SMOODEV-2150).
+#[cfg(feature = "codegen")]
+pub mod spec_codegen;
+
 /// Tenant-scoped typed query layer over `sqlx`.
 #[cfg(feature = "tenant")]
 pub mod tenant;
@@ -73,5 +78,7 @@ pub use spec::{
     PolicySpec, ReferentialAction, RoleSpec, SequenceOptions, SequenceSpec, UniqueConstraintSpec,
     ViewSpec,
 };
+#[cfg(feature = "codegen")]
+pub use spec_codegen::emit_spec_rust;
 #[cfg(feature = "tenant")]
 pub use tenant::{TenantError, TenantScopedTable};
