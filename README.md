@@ -5,9 +5,11 @@
 [![CI](https://github.com/SmooAI/postgres-kit/actions/workflows/rust.yml/badge.svg)](https://github.com/SmooAI/postgres-kit/actions/workflows/rust.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-**A Rust-native, declarative Postgres schema toolkit. Your `PgTableSpec` is the single source of truth.**
+**A Drizzle→Rust schema bridge — and a standalone, declarative Postgres schema toolkit for Rust.**
 
-Rust has excellent SQL access (`sqlx`) and migration *runners* (`sqlx migrate`, `refinery`, `sea-orm-migration`) — but nothing that does **declarative, diff-based schema-as-code migrations** in Rust, as a library, the way tools like [Atlas](https://atlasgo.io/) do for other ecosystems. `smooai-postgres-kit` fills that gap: you declare a table once, in Rust, and the kit derives the rest.
+`smooai-postgres-kit` gives Rust services faithful, **drift-checked** access to a schema that's owned elsewhere: introspect a live Postgres database into typed Rust specs, then generate serde/`sqlx` `FromRow` rows + `COLUMNS` consts, a tenant-scoped (anti-IDOR) query layer, serde/TS/Zod types, and a drift gate. It pairs naturally with a TypeScript-side schema owner like [Drizzle](https://orm.drizzle.team/) — Drizzle authors the schema and migrations (where its DX shines: `$type<>`, relations, `createSelectSchema`, the typed query builder), and the kit keeps the Rust side in lockstep, gated by drift so it can never silently diverge.
+
+It's *also* a standalone toolkit: declare tables in Rust and get `CREATE TABLE` DDL, a snapshot differ, and forward-only migrations — for greenfield Rust or non-Drizzle stacks. (Rust has great SQL access via `sqlx` and migration *runners*, but no library that does declarative, diff-based schema-as-code the way [Atlas](https://atlasgo.io/) does for other ecosystems; the toolkit side fills that gap.)
 
 ```toml
 [dependencies]

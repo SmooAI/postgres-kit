@@ -1,9 +1,20 @@
 # Roadmap
 
-`smooai-postgres-kit` makes a Rust `PgTableSpec` the single source of truth for
-the Postgres layer — owning declarative, diff-based schema-as-code migrations and
-deriving rows, the typed sqlx layer, and TS/Zod types from one declaration. Tracked internally
-as SMOODEV-2119 (ADR-048); the Postgres counterpart to `smooai-clickhouse-kit`.
+`smooai-postgres-kit` is the **Drizzle→Rust bridge** (and a standalone Rust
+schema toolkit). A TypeScript-side owner (e.g. Drizzle) authors the schema and
+migrations — where its DX shines (`$type<>`, relations, `createSelectSchema`, the
+typed query builder); the kit introspects the live database and gives Rust services
+**drift-checked** rows, a tenant-scoped query layer, and serde/TS/Zod codegen, so
+the Rust side can never silently diverge. It is *also* a standalone toolkit
+(`PgTableSpec` DSL + `CREATE TABLE` DDL + snapshot differ + forward-only
+migrations) for greenfield / non-Drizzle Rust.
+
+> Direction note: an earlier plan (ADR-048) made the Rust `PgTableSpec` the single
+> source of truth and had the kit own migrations. That was **walked back in
+> ADR-052** — Drizzle's TS-level richness (`$type`/relations/zod) can't be
+> reconstructed from DB introspection, and its migration DX is better. So the kit
+> is a bridge, not the source of truth. The differ/migration engine remains a
+> standalone capability, not the way this monorepo manages migrations.
 
 The generic engine is vendor-neutral and gated behind cargo features so the
 public crate carries no SmooAI specifics.
